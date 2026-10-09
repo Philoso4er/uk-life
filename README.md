@@ -26,6 +26,10 @@ Working title, prototype stage. Inspired by the *idea* of Lagos Life (a social l
 | **Real UK time** | Peckwell runs on the real Europe/London clock: lamps come on at real dusk, the pub quiz is on real Tuesday nights, and rent leaves your account at the real **Monday 09:00**. While you're out and about your personal "life clock" runs 4× faster so needs actually move. Come back after a break and a capped (12h), gentle catch-up tells you what happened while you were out. Daily login streak with a small reward each day. |
 | **Economy loop** | Needs drain over time; places restore them for £. You work shifts to earn money. Rent and council tax leave your account every Monday at 09:00, with a landlord WhatsApp (and a surprise rent rise about 45% of the time, "because of The Market"). Miss a payment and you're in arrears; miss two and you're evicted back to Dave's sofa. Oyster balance pays for fast travel between stations (£2.80). A brolly stops rain hurting your mood, until you lose it (3 days, guaranteed). The park lifts your mood. Run out of energy and you pass out on the night bus. |
 | **Jobs** (each takes in-game hours) | **Barista** at Prêt-à-Pricey: build drinks in the right order against the clock. **Delivery Rider** at PFC: an on-map shift where you ride to 3 doors with a timer, and quicker drops earn bigger tips. **Office Temp** at Synergy House (unlocks after 1 shift): inbox triage, i.e. reply to the boss, archive the yoghurt thread, report the phishing. **Bus Driver** at the Bus Garage (unlocks after 3 shifts): stop the 436 at the stop. |
+| **Life happens** (event cards) | Every 5–9 minutes of play (and soon after a new day starts) a British life event lands as a choice card: a Tube strike (the Tube is shut all day, so take the rail replacement bus), a TV Licensing-ish letter, a boiler that only works if you hit it, a “Sorry we missed you” card (you were in), a dodgy “Royal Mall” parcel text, a stag do in Bournemouth with a spreadsheet of fines, a 24°C heatwave (national emergency), the council tax single person discount form, Mum ringing (a CALL, not a text), a fox in the bins, a one-footed pigeon nicking your lunch, the party upstairs, which-bin-is-it bin day, a landlord “popping round in 30 mins”, and a leaving-do envelope for someone you've never met. Choices cost money, move needs, add moodlets, post to Natter or change the world for the day. |
+| **Careers** | Every shift earns XP (more for a good score). Fill the bar and you're called in for a **performance review** card: accept, negotiate with Charm for a signing bonus, or say you're not ready. Five titles per job, from Trainee to Area Manager-ish, with pay ×1 → ×2.35. During shifts a **mid-shift dilemma** card pauses the mini-game (out of oat milk; spelling “Siobhan”; cake in the kitchen; the reply-all apocalypse; someone running for the bus; “could you take the bins out?”). Your choice nudges the pay multiplier or adds a tip. |
+| **Prepayment meter & damp** | Rented homes have a key meter that drains every real day (more in winter). Top up £10/£20 at Kwik Mart. Run dry and you're on £5 emergency credit, then the electric goes off: no kettle, cold showers, a mood penalty. Damp creeps up every day, faster in winter and if you never put the heating on. Fight it by putting the heating on (uses meter credit, gives *Toasty*), opening the windows, bleaching Kevin the mould, or texting the landlord (25% chance he actually sends someone). |
+| **Universal Credit-ish** | Claim at Jobcentre Minus: £92/week plus half your rent, paid on the real Monday with a statement in Messages. A 55% taper applies to earnings over £100 a week. Commitments: a weekly work-coach appointment with Sandra (on a weekday; miss it and you're sanctioned) and 2 job searches a week (job board or library Wi-Fi). Miss searches once and you get a warning; twice and you lose half the standard allowance. The Work app shows your estimate. |
 | **Homes** | Dave's sofa (free) → box room in a flatshare (£165/wk) → studio (£295/wk) → one-bed with a concierge (£520/wk). Move in costs a week's rent plus a deposit. Sleep, nap, shower, beans on toast or put the kettle on (teabags required) at home. |
 | **Your phone** (📱) | **Natter**, the local social feed: post, like and reply, while the NPC locals moan about the 436, gossip about what you’ve just done (“{you} at the pond feeding the ducks. Gerald the duck looked so happy.”), reply to your posts, and Big Tel says he can't complain (then complains in a reply thread). **Messages**: one-to-one DMs with locals (typing indicator, occasionally left on read), Mum, Dave, and other real players; landlords and the bank text you here too. Plus Work, Bank (rent countdown), Goals (12), Me (needs, moodlets, skills, stats) and Settings (mute list, allow DMs, help). |
 | **Billboards** | 6 ad slots on the map (rooftops, the railway bridge, the park gate) showing "YOUR AD HERE · £X/week". Tap one for price, estimated footfall and a mock enquiry. No payments are taken and nothing is sent. |
@@ -52,7 +56,7 @@ Other scripts:
 
 ```bash
 npm run typecheck    # tsc --noEmit
-npm test             # vitest: London clock + rent key, billing, catch-up, streaks, save migration, needs/moodlets, timed actions, social store + NPC brain, filter, wire sanitising, map, two-client transport
+npm test             # vitest: event cards, careers/reviews, meter + damp, UC taper + sanctions, London clock + rent key, billing, catch-up, streaks, save migration, needs/moodlets, timed actions, social store + NPC brain, filter, wire sanitising, map, two-client transport
 npm run build        # typecheck + production build to dist/
 npm run preview      # serve dist/ on http://localhost:4173
 
@@ -62,7 +66,7 @@ npm run shots        # writes ./shots/*.png
 npm run test:mp
 ```
 
-Add `?debug=1` to the URL to expose `window.__ukl` (the engine) in the console, e.g. `__ukl.engine.setRain(true)` or `__ukl.setClockOffset(__ukl.msUntilRent() - 5000)` (five seconds before rent day). `?debug=1&clock=<ms>` starts the whole game shifted in time.
+Add `?debug=1` to the URL to expose `window.__ukl` (the engine) in the console, e.g. `__ukl.engine.setRain(true)` or `__ukl.setClockOffset(__ukl.msUntilRent() - 5000)` (five seconds before rent day). `?debug=1&clock=<ms>` starts the whole game shifted in time. `__ukl.showEvent('strike')` shows any event card, and `__ukl.events.off = true` stops random ones.
 
 To enable multiplayer locally, copy `.env.example` to `.env.local` and fill it in.
 
@@ -101,6 +105,7 @@ src/
     time.ts       real Europe/London clock, rent key (Monday 09:00), debug clock offset
     needs.ts      needs, moodlets, mood, passing time
     actions.ts    every place's timed actions (costs, effects, outcomes)
+    events.ts     life-event cards, performance reviews, mid-shift dilemmas, prepayment meter, damp, Universal Credit-ish
     economy.ts    jobs + career ladders, homes, rent/council tax, streaks, catch-up, save/load + migration
     social.ts     Natter feed + Messages store (posts, likes, replies, DMs, mute/report)
     npcs.ts       NPC personas, their posts, gossip, replies and DMs
@@ -125,7 +130,7 @@ scripts/          Playwright screenshot tour + two-tab multiplayer check
 - **Housing upgrades:** furnish your flat, flatmates (other players), house parties, buy-to-let as a late-game grind, and Right to Buy jokes.
 - **Server-side economy:** move money and rent to Supabase (Postgres + RLS + edge functions) so progress follows you across devices and can't be faked. Add accounts via magic link.
 - **Social:** emotes (the British nod), group chats, shared likes/history via a database, five-a-side as a real multiplayer event.
-- **Seasonal events:** Notting Hill-ish carnival, Bonfire Night, a heatwave (24°C, a national emergency), a Boxing Day sale queue.
+- **Seasonal events:** Notting Hill-ish carnival, Bonfire Night, a Boxing Day sale queue.
 - **Moderation:** report/mute, server-side filtering, and rate limits enforced by an edge function.
 - **Sound:** rain ambience, Tube chimes, "mind the gap".
 
@@ -135,6 +140,7 @@ scripts/          Playwright screenshot tour + two-tab multiplayer check
 - The Supabase transport has been type-checked against `@supabase/supabase-js` v2 but **not tested against a live project** (no credentials were available while building this). The same code paths (remote players, interpolation, chat, counter) were tested end-to-end with the BroadcastChannel transport in two headless tabs, plus unit tests.
 - On Supabase's free tier, the realtime **message quota** will be the first thing you hit if it gets busy: every position update is fanned out to every connected player. Check the current plan limits. Before going big, add area-based channels, lower the tick rate or move to a dedicated game server.
 - The profanity filter is a word list. It's decent but beatable.
+- Universal Credit-ish is a loose, comedic simplification (a flat allowance, half your rent, a weekly appointment), not real benefits advice.
 - Time is real: rent day is once a real week. Your needs run on a faster personal "life clock" while you play, so the two don't line up exactly (by design).
 - Parody names are deliberately not real trademarks, and the station mark is our own diamond, not the TfL roundel. It's still worth a sanity check before any commercial launch.
 

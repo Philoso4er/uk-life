@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { EMERGENCY_CREDIT, UC_SEARCHES, UC_WORK_ALLOWANCE, meterDaily, ucAward } from '../game/events';
 import type { Engine, Snapshot } from '../game/engine';
 import { GOALS, HOMES, JOBS, LEVEL_PAY, completeGoal, jobTitle, levelPay, money, nextLevelXp, shiftAvailability, type GameEvent } from '../game/economy';
 import { NEEDS, moodPayMult } from '../game/needs';
@@ -517,6 +518,21 @@ function Thread({ engine, social, peer, onEvents, toast }: { engine: Engine; soc
 }
 
 // ------------------------------------------------------------------ Work, Bank, Goals, Me, Settings
+function UcCard({ save }: { save: SaveState }) {
+  if (!save.uc.claiming) return null;
+  const a = ucAward(save);
+  return (
+    <div className="stats uc-card">
+      <div className="uc-head">📄 Universal Credit-ish journal</div>
+      <Row k="This week (est.)" v={`${money(a.total)} on Monday`} />
+      <Row k="Breakdown" v={`£${a.base} standard${a.housing ? ` + ${money(a.housing)} housing` : ''}${a.taper ? ` − ${money(a.taper)} taper` : ''}${a.sanction ? ` − ${money(a.sanction)} sanction` : ''}`} />
+      <Row k="Earned this week" v={`${money(save.uc.weekEarned)} (first ${money(UC_WORK_ALLOWANCE)} is yours, then 55p in £1 comes off)`} />
+      <Row k="Job searches" v={`${save.uc.searches}/${UC_SEARCHES}${save.uc.searches >= UC_SEARCHES ? ' ✓' : ' · library Wi-Fi or the job board'}`} />
+      <Row k="Work coach" v={save.uc.appt ? `Sandra, ${save.uc.appt === london().dateKey ? 'TODAY' : save.uc.appt}` : '-'} />
+    </div>
+  );
+}
+
 function Work({ save }: { save: SaveState }) {
   const avail = shiftAvailability(save);
   if (!save.job)
@@ -525,8 +541,9 @@ function Work({ save }: { save: SaveState }) {
         <div className="big-card">
           <div className="big-emoji">🪑</div>
           <b>Between opportunities</b>
-          <p className="muted">Pop into Jobcentre Minus on the high street to sign up for a job. Odd jobs (glass collecting, the 8am rush, busking) pay cash in hand meanwhile.</p>
+          <p className="muted">Pop into Jobcentre Minus on the high street to sign up for a job, or start a Universal Credit-ish claim. Odd jobs (glass collecting, the 8am rush, busking) pay cash in hand meanwhile.</p>
         </div>
+        <UcCard save={save} />
       </div>
     );
   const j = JOBS[save.job];
@@ -554,14 +571,15 @@ function Work({ save }: { save: SaveState }) {
         <Row k="Career ladder" v={j.titles.join(' → ')} />
         <Row k="Pay ranks" v={LEVEL_PAY.map((p) => `×${p}`).join(' ')} />
       </div>
-      <p className="muted small">Good mood = better tips: pay ×{moodPayMult(save.mood).toFixed(2)} right now.</p>
+      <p className="muted small">Good mood = better tips: pay ×{moodPayMult(save.mood).toFixed(2)} right now. Every shift earns XP; fill the bar and you’ll get called in for a review.</p>
+      <UcCard save={save} />
     </div>
   );
 }
 
 function Bank({ save, snap }: { save: SaveState; snap: Snapshot }) {
   const home = HOMES[save.home];
-  const weekly = save.home === 'sofa' ? 0 : save.rent + home.councilTax;
+  const weekly = save.home === 'sofa' ? 0 : save.rent + (save.flags.ctDiscount ? home.councilTax * 0.75 : home.councilTax);
   const toRent = msUntilRent(snap.now);
   return (
     <div className="app-pad">
@@ -572,12 +590,14 @@ function Bank({ save, snap }: { save: SaveState; snap: Snapshot }) {
           <span>
             <span className="oyster-mini" /> Oyster {money(save.oyster)}
           </span>
-          <span>⚡ Meter {money(save.meter)}</span>
+          <span className={save.meter <= 0 && save.home !== 'sofa' ? 'warn-text' : undefined}>⚡ Meter {save.home === 'sofa' ? 'Dave’s' : save.meter <= 0 ? `emergency (${money(save.meter + EMERGENCY_CREDIT)} left)` : money(save.meter)}</span>
         </div>
       </div>
       <div className="stats">
         <Row k="Rent day" v={`Monday ${String(RENT_HOUR).padStart(2, '0')}:00 (real time) · in ${fmtDuration(toRent)}`} />
-        <Row k="Weekly bills" v={save.home === 'sofa' ? '£0 (thanks Dave)' : `${money(save.rent)} rent + ${money(home.councilTax)} council tax`} />
+        <Row k="Weekly bills" v={save.home === 'sofa' ? '£0 (thanks Dave)' : `${money(save.rent)} rent + ${money(save.flags.ctDiscount ? home.councilTax * 0.75 : home.councilTax)} council tax`} />
+        {save.home !== 'sofa' ? <Row k="Electric" v={`Prepayment key, about ${money(meterDaily(london(snap.now)))}/day. Top up at Kwik Mart.`} /> : null}
+        {save.home !== 'sofa' ? <Row k="Damp" v={`${Math.round(save.damp)}% ${save.damp >= 60 ? '(Kevin the mould is thriving)' : save.damp >= 30 ? '(a bit musty)' : '(fine, for now)'}`} /> : null}
         {weekly ? <Row k="After bills" v={money(save.money - weekly)} /> : null}
         {save.arrears ? <Row k="⚠️ Arrears" v="One missed rent. Another and you’re out." /> : null}
         <Row k="Earned (lifetime)" v={money(save.stats.earned)} />

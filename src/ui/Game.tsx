@@ -10,6 +10,7 @@ import { buildingById, doorFront, stations, TUBE_FARE, type Billboard, type Buil
 import { createTransport } from '../net';
 import { BUS_FARE, BUS_STOPS, BillboardDialog, BusList, EventCard, HomesList, JobsList, Modal, ShiftBanner, TravelList, type CardChoice } from './Dialogs';
 import { BaristaGame, BusGame, OfficeGame } from './MiniGames';
+import { EVENT_BY_ID, SHIFT_CARDS, eventDebug, choiceBlocked, resolveChoice, shiftXp, titleOf, type ShiftMods } from '../game/events';
 import { Hud } from './Hud';
 import { Creator } from './Creator';
 import { PlaceDialog, ctxNow } from './Place';
@@ -63,6 +64,10 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), onTap ? 5200 : 3800);
   }, []);
   const card = useCallback((c: Omit<Card, 'id'>) => setCards((q) => [...q, { ...c, id: toastId++ }]), []);
+  /** show straight after the card currently on screen (for "what happened next") */
+  const cardNext = useCallback((c: Omit<Card, 'id'>) => setCards((q) => [...q.slice(0, 1), { ...c, id: toastId++ }, ...q.slice(1)]), []);
+  const shiftMods = useRef<ShiftMods>({ bonus: 0, mult: 1 });
+  const showEventRef = useRef<(id: string) => void>(() => {});
 
   const engineRef = useRef<Engine | null>(null);
   const handleEvents = useCallback(
@@ -75,15 +80,20 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
           const m = MOODLETS[x.id];
           if (m) toast(`${m.emoji} ${m.name} (${m.mood > 0 ? '+' : ''}${m.mood} mood)`, m.mood >= 0 ? 'good' : 'bad');
         } else if (x.type === 'gossip') e?.brain.gossip(x.key);
+        else if (x.type === 'card') showEventRef.current(x.id);
+        else if (x.type === 'post' && e) {
+          e.social.post(x.text);
+          e.say(x.text);
+        }
         else if (x.type === 'phone' && e) {
           const a = x.from === 'Mum' ? contactAuthor('mum') : x.from === 'Dave' ? contactAuthor('dave') : systemAuthor(x.from);
           e.social.incoming(a, x.text, { tone: x.tone, lines: x.lines }, false);
           if (x.quiet) toast(`✉️ ${x.from}: ${x.text}`, x.tone ?? 'info', () => setPhone(`thread:${a.id}`));
           else
             card({
-              emoji: x.lines ? '🧾' : '📱',
+              emoji: x.lines ? (x.lines.some((l) => l.amount < 0) ? '💷' : '🧾') : '📱',
               kicker: `New message · ${x.from}`,
-              title: x.lines ? 'Rent day' : x.from,
+              title: x.lines ? (x.lines.some((l) => l.amount < 0) ? 'Payment day' : 'Rent day') : x.from,
               body: (
                 <>
                   <p>{x.text}</p>
@@ -92,7 +102,7 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
                       {x.lines.map((l) => (
                         <div key={l.label} className="bill-row">
                           <span>{l.label}</span>
-                          <b>-{money(l.amount)}</b>
+                          <b className={l.amount < 0 ? 'credit' : undefined}>{l.amount < 0 ? '+' : '-'}{money(Math.abs(l.amount))}</b>
                         </div>
                       ))}
                       <div className="bill-row total">
@@ -154,7 +164,11 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
       onEvents: (ev) => handleEventsRef.current(ev),
       onDeliveryDone: (earned, onTime, total) => {
         const out: GameEvent[] = [];
+        const tip = Math.round(shiftMods.current.bonus * 100) / 100;
+        earned = Math.round((earned * shiftMods.current.mult + tip) * 100) / 100;
+        shiftMods.current = { bonus: 0, mult: 1 };
         finishShift(e.save, JOBS.rider, earned, out);
+        shiftXp(e.save, total ? onTime / total : 0, out);
         e.touch();
         handleEventsRef.current(out);
         card({ emoji: '🛵', kicker: 'Delivery shift done', title: `+${money(earned)}`, body: <p>{onTime}/{total} drops on time. {onTime === total ? 'Five stars. The chips were still warm.' : onTime ? 'Mixed reviews. One customer says you “looked stressed”.' : 'One star: “chips were cold, rider was sweaty”.'}</p>, choices: [{ label: 'Lovely', onPick: () => {} }] });
@@ -170,7 +184,7 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     createTransport().then((t) => {
       if (alive) void e.start(t);
     });
-    if (params.has('debug')) (window as unknown as { __ukl: unknown }).__ukl = { engine: e, setDialog, setPhone, setClockOffset, getClockOffset, london, msUntilRent, writeSave, card, tel: () => { const p = e.social.npcPost(e.brain.author(PERSONAS[0]), 'Can’t complain 👍', { likes: 6 }); e.brain.complain(p.id); e.social.pump(Date.now() + 120000); }, handle: (ev: GameEvent[]) => handleEventsRef.current(ev) };
+    if (params.has('debug')) (window as unknown as { __ukl: unknown }).__ukl = { engine: e, setDialog, setPhone, setClockOffset, getClockOffset, london, msUntilRent, writeSave, card, tel: () => { const p = e.social.npcPost(e.brain.author(PERSONAS[0]), 'Can’t complain 👍', { likes: 6 }); e.brain.complain(p.id); e.social.pump(Date.now() + 120000); }, handle: (ev: GameEvent[]) => handleEventsRef.current(ev), events: eventDebug, showEvent: (id: string) => showEventRef.current(id) };
     const saver = setInterval(() => writeSave(e.save), 4000);
     const onHide = () => {
       writeSave(e.save);
@@ -218,6 +232,51 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [dialog, phone, cards.length, modalUp]);
+
+  showEventRef.current = (id: string) => {
+    const def = EVENT_BY_ID[id];
+    const engine = engineRef.current;
+    if (!def || !engine) return;
+    const s = engine.save;
+    card({
+      emoji: def.emoji,
+      kicker: def.kicker,
+      title: titleOf(def, s),
+      body: <p>{def.text(s)}</p>,
+      choices: def.choices.map((c, i) => {
+        const why = choiceBlocked(s, c);
+        return {
+          label: c.label,
+          note: why ?? c.note,
+          disabled: !!why,
+          tone: i === 0 ? 'primary' : 'ghost',
+          onPick: () => {
+            const out: GameEvent[] = [];
+            const r = resolveChoice(s, def, i, out, shiftMods.current);
+            s.eventLog[def.id] = Date.now();
+            engine.touch();
+            cardNext({ emoji: def.emoji, kicker: def.kicker, title: r.tone === 'bad' ? 'Oh dear.' : r.tone === 'good' ? 'Get in.' : 'Right then.', body: <p>{r.text}</p>, choices: [{ label: r.tone === 'bad' ? 'Typical' : 'Carry on', onPick: () => {} }] });
+            handleEvents(out);
+          },
+        } satisfies CardChoice;
+      }),
+    });
+  };
+
+  // mid-shift dilemmas: once per mini-game shift, and after the first drop on a delivery run
+  const shiftJob = dialog?.kind === 'shift' ? dialog.job : null;
+  useEffect(() => {
+    if (!shiftJob) return;
+    const pool = SHIFT_CARDS[shiftJob];
+    const id = setTimeout(() => showEventRef.current(pool[Math.floor(Math.random() * pool.length)].id), 9000 + Math.random() * 7000);
+    return () => clearTimeout(id);
+  }, [shiftJob]);
+  const dropIdx = snap?.delivery?.index ?? -1;
+  useEffect(() => {
+    if (dropIdx !== 1 || Math.random() > 0.65) return;
+    const pool = SHIFT_CARDS.rider;
+    showEventRef.current(pool[Math.floor(Math.random() * pool.length)].id);
+  }, [dropIdx]);
 
   if (!snap || !engine || !social)
     return (
@@ -292,6 +351,16 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
       toast(`Arrived at ${st.name}.`, 'info');
     });
   };
+  const replacementBus = (id: string) => {
+    const out: GameEvent[] = [];
+    passTime(s, 50, { raining: false, outdoors: false });
+    gainMoodlet(s, 'rail_replacement', out);
+    const st = stations.find((x) => x.id === id)!;
+    journey('🚌', pickOne(['The rail replacement bus goes via a retail park, a roundabout, and what looks like Wales.', 'The driver doesn’t know the way. A passenger is giving directions off Google Maps.', 'You have been on this bus so long you have made a friend and lost them.']), buildingById(st.id), () => {
+      handleEvents(out);
+      toast(`Eventually, ${st.name}.`, 'info');
+    });
+  };
   const rideBus = (id: string) => {
     if (s.oyster < BUS_FARE) return;
     s.oyster = Math.round((s.oyster - BUS_FARE) * 100) / 100;
@@ -302,6 +371,7 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
   const startShift = (job: JobId) => {
     const avail = shiftAvailability(s);
     if (!avail.ok) return toast(avail.reason!, 'bad');
+    shiftMods.current = { bonus: 0, mult: 1 };
     if (job === 'rider') {
       setDialog(null);
       engine.startDelivery();
@@ -311,9 +381,14 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     setDialog({ kind: 'shift', job });
   };
   const shiftDone = (job: JobId, score: number, summary: string) => {
-    const mult = levelPay(s) * moodPayMult(effectiveMood(s, snap.raining));
-    const pay = shiftPay(JOBS[job], score, mult);
-    run((out) => finishShift(s, JOBS[job], pay, out));
+    const m = shiftMods.current;
+    const mult = levelPay(s) * moodPayMult(effectiveMood(s, snap.raining)) * Math.max(0.5, m.mult);
+    const pay = Math.round((shiftPay(JOBS[job], score, mult) + m.bonus) * 100) / 100;
+    shiftMods.current = { bonus: 0, mult: 1 };
+    run((out) => {
+      finishShift(s, JOBS[job], pay, out);
+      shiftXp(s, score, out);
+    });
     setDialog(null);
     card({ emoji: job === 'barista' ? '☕' : job === 'temp' ? '📎' : '🚌', kicker: `${JOBS[job].title} shift done`, title: `+${money(pay)}`, body: <p>{summary}</p>, choices: [{ label: 'Lovely', onPick: () => {} }] });
   };
@@ -328,7 +403,43 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     const common = { b, save: s, ctxFn, onEvents: (ev: GameEvent[]) => run(() => handleEvents(ev)), onClose: close };
     if (b.kind === 'jobcentre') content = <PlaceDialog {...common} tabs={[{ id: 'jobs', label: 'Jobs', node: <JobsList save={s} onTake={takeJob} /> }]} defaultTab={s.job ? 'do' : 'jobs'} greeting={`You take a ticket: #${380 + (london().mm % 60)}. Now serving: #9.`} />;
     else if (b.kind === 'lettings') content = <PlaceDialog {...common} tabs={[{ id: 'homes', label: 'Homes', node: <HomesList save={s} onRent={rent} onSofa={backToSofa} /> }]} defaultTab="homes" greeting="Josh looks up from his phone. “Hiya! Everything’s going fast, so… yeah.”" />;
-    else if (b.kind === 'tube') content = <PlaceDialog {...common} tabs={[{ id: 'travel', label: 'Travel', node: <TravelList from={b.tube!} snap={snap} onTravel={travelTo} /> }]} defaultTab="travel" />;
+    else if (b.kind === 'tube') {
+      const strike = s.flags.strike === london().dateKey;
+      content = (
+        <PlaceDialog
+          {...common}
+          tabs={[
+            {
+              id: 'travel',
+              label: strike ? 'Strike!' : 'Travel',
+              node: strike ? (
+                <>
+                  <p className="notice">🪧 The shutters are down. A hand-written sign: “NO SERVICE TODAY. RAIL REPLACEMENT BUS OUTSIDE. SORRY (NOT SORRY).”</p>
+                  <ul className="item-list">
+                    {stations
+                      .filter((x) => x.id !== b.tube)
+                      .map((x) => (
+                        <li key={x.id} className="item">
+                          <div className="item-main">
+                            <div className="item-name">🚌 {x.name}</div>
+                            <div className="item-note">Rail replacement bus · free · about 50 minutes (via everywhere)</div>
+                          </div>
+                          <button className="btn btn-primary" onClick={() => replacementBus(x.id)}>
+                            Get on
+                          </button>
+                        </li>
+                      ))}
+                  </ul>
+                </>
+              ) : (
+                <TravelList from={b.tube!} snap={snap} onTravel={travelTo} />
+              ),
+            },
+          ]}
+          defaultTab="travel"
+        />
+      );
+    }
     else if (b.id === 'busstop') content = <PlaceDialog {...common} tabs={[{ id: 'ride', label: 'Ride the 436', node: <BusList snap={snap} onRide={rideBus} /> }]} defaultTab="ride" />;
     else if (b.kind === 'home') {
       const mine = b.homeId === s.home;
@@ -336,7 +447,7 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
       content = (
         <PlaceDialog
           {...common}
-          greeting={mine ? (s.home === 'sofa' ? 'Free! Dave’s paying the council tax and he’d like you to know that.' : `Rent ${money(s.rent)}/wk + council tax ${money(h.councilTax)}/wk, every real Monday 09:00.${s.arrears ? ' ⚠️ You’re in arrears.' : ''}`) : b.blurb}
+          greeting={mine ? (s.home === 'sofa' ? 'Free! Dave’s paying the council tax and he’d like you to know that.' : `Rent ${money(s.rent)}/wk + council tax, every real Monday 09:00. ⚡ Meter ${s.meter > 0 ? money(s.meter) : 'on EMERGENCY'} · 🍄 Damp ${Math.round(s.damp)}%.${s.arrears ? ' ⚠️ You’re in arrears.' : ''}`) : b.blurb}
           closed={mine ? undefined : <p className="notice">{h.id === 'sofa' ? 'Dave is out. You don’t live here any more: the cat has taken your spot.' : `Units here go for ${money(h.rent)}/week. Enquire at Fleecems Lettings on the high street.`}</p>}
         />
       );
@@ -382,7 +493,7 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     const done = (score: number, summary: string) => shiftDone(job, score, summary);
     content = (
       <div className="modal-backdrop">
-        <div className="panel modal minigame-modal">{job === 'barista' ? <BaristaGame onDone={done} /> : job === 'temp' ? <OfficeGame onDone={done} /> : <BusGame onDone={done} />}</div>
+        <div className="panel modal minigame-modal">{job === 'barista' ? <BaristaGame onDone={done} paused={cards.length > 0} /> : job === 'temp' ? <OfficeGame onDone={done} paused={cards.length > 0} /> : <BusGame onDone={done} paused={cards.length > 0} />}</div>
       </div>
     );
   }

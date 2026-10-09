@@ -159,7 +159,7 @@ function ActionRow({ a, save, ctx, onGo }: { a: ActionDef; save: SaveState; ctx:
             {a.moodlet && MOODLETS[a.moodlet] ? <span className="fx moodlet">{MOODLETS[a.moodlet].emoji} {MOODLETS[a.moodlet].name}</span> : null}
           </span>
         </span>
-        <span className={'action-cost' + (cost ? '' : ' free')}>{cost ? money(cost) : 'Free'}</span>
+        <span className={'action-cost' + (cost || a.price ? '' : ' free')}>{a.price ?? (cost ? money(cost) : 'Free')}</span>
       </button>
     </li>
   );

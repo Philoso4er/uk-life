@@ -2449,3 +2449,9 @@ kbd {
     padding: 9px 10px;
   }
 }
+
+/* ---- phase 2 */
+.bill-row b.credit { color: #2f9e5e; }
+.warn-text { color: #ffb4a8; font-weight: 700; }
+.uc-card { margin-top: 12px; }
+.uc-head { font-weight: 800; font-size: 13px; padding: 4px 0 6px; }

@@ -105,6 +105,7 @@ export type GameEvent =
   | { type: 'moodlet'; id: string }
   | { type: 'gossip'; key: string }
   | { type: 'card'; id: string }
+  | { type: 'post'; text: string }
   | { type: 'streak'; count: number; title: string; text: string }
   | { type: 'summary'; title: string; lines: string[] };
 
@@ -294,10 +295,11 @@ export function billWeek(s: SaveState, out: GameEvent[]) {
     return;
   }
   const home = HOMES[s.home];
-  const total = s.rent + home.councilTax;
+  const ct = s.flags.ctDiscount ? Math.round(home.councilTax * 0.75 * 100) / 100 : home.councilTax;
+  const total = s.rent + ct;
   const lines = [
     { label: `Rent · ${home.name}`, amount: s.rent },
-    { label: 'Council tax (Band B, feels like Band Z)', amount: home.councilTax },
+    { label: s.flags.ctDiscount ? 'Council tax (25% single person discount)' : 'Council tax (Band B, feels like Band Z)', amount: ct },
   ];
   if (s.money >= total) {
     s.money = Math.round((s.money - total) * 100) / 100;

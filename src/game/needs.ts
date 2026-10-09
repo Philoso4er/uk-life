@@ -87,7 +87,9 @@ export function dynamicMoodlets(s: SaveState, raining = false): MoodletDef[] {
   if (s.social < 15) out.push(M('lonely', '🫥', 'Bit Lonely', -8, 0, 'Social is very low. Natter to someone, even a pigeon.'));
   if (s.hygiene < 20) out.push(M('whiffy', '🦨', 'Whiffy', -8, 0, 'Hygiene is very low. People are moving seats.'));
   if (s.warmth < 20) out.push(M('brass', '🥶', 'Brass Monkeys', -10, 0, 'Warmth is very low. Get inside, have a cuppa, find a radiator.'));
-  if (s.money < 5) out.push(M('skint', '🪙', 'Skint', -6, 0, 'Under a fiver to your name. Sapa, British edition.'));
+  if (s.money < 5) out.push(M('skint', '🪙', 'Skint', -6, 0, 'Under a fiver to your name. Beans for tea again.'));
+  if (s.home !== 'sofa' && s.meter <= 0) out.push(M('meter_empty', '🔌', 'Meter’s Run Out', -5, 0, 'No electric at home. Top up the key at Kwik Mart.'));
+  if (s.home !== 'sofa' && s.damp >= 60) out.push(M('damp', '🍄', 'Damp Flat', -4, 0, 'There’s a patch on the ceiling shaped like Norfolk. It’s growing.'));
   const t = london();
   if (t.dayIdx === 0 && t.hh < 12) out.push(M('monday', '📅', 'Monday Morning', -4, 0, 'It’s Monday. That’s it, that’s the moodlet.'));
   if (t.dayIdx === 4 && t.hh >= 16) out.push(M('friday', '🥳', 'Friday Feeling', 6, 0, 'It’s Friday after 4pm. Legally the weekend.'));

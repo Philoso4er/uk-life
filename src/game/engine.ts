@@ -347,7 +347,9 @@ export class Engine {
   }
   npcCtx() {
     const t = london();
-    return { raining: this.raining, hh: t.hh, dayIdx: t.dayIdx, flags: this.save.flags };
+    const f = this.save.flags;
+    // date-stamped flags only count on the day they were set
+    return { raining: this.raining, hh: t.hh, dayIdx: t.dayIdx, flags: { ...f, strike: f.strike === t.dateKey, heatwave: f.heatwave === t.dateKey } };
   }
 
   startDelivery() {

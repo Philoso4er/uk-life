@@ -69,6 +69,7 @@ async function tour(label, viewport, mobile) {
   await w(400);
   await shot('03-event-card-streak');
   await dismissCards();
+  await dbg(() => { window.__ukl.events.off = true; }); // we trigger cards ourselves below
   await setLondon(1, 12, 30); // Tuesday lunchtime
 
   // ---- a timed action at Crumbs
@@ -127,6 +128,14 @@ async function tour(label, viewport, mobile) {
     await page.locator('.mg-btn', { hasText: lbl }).first().click();
     await w(150);
   }
+  // a mid-shift dilemma pops up (and pauses the mini-game)
+  await page.waitForSelector('.event-card', { timeout: 20000 });
+  await w(400);
+  await shot('12a-mid-shift-card');
+  await page.locator('.event-card .event-choice:not([disabled])').first().click();
+  await w(400);
+  await shot('12b-mid-shift-outcome');
+  await page.locator('.event-card .event-choice').first().click();
   await page.waitForSelector('.event-card', { timeout: 45000 });
   await w(400);
   await shot('12-shift-result-card');
@@ -196,6 +205,40 @@ async function tour(label, viewport, mobile) {
   await shot('20-rain-night-delivery');
   await dbg(() => window.__ukl.engine.cancelDelivery());
   await w(300);
+  await dismissCards();
+
+  // ---- Phase 2: life happens. A random card, its outcome, a strike, the meter and a promotion
+  await dbg(() => { const e = window.__ukl.engine; e.setRain(false); e.save.damp = 64; e.save.meter = 2.4; e.touch(); window.__ukl.showEvent('fox'); });
+  await w(500);
+  await shot('22-event-card-fox');
+  await page.locator('.event-card .event-choice').first().click();
+  await w(400);
+  await shot('23-event-card-outcome');
+  await dismissCards();
+  await enter(14.5, 9.6, /Enter Grimewood/);
+  await shot('24-home-meter-damp');
+  await page.keyboard.press('Escape');
+  await w(200);
+  await dbg(() => window.__ukl.showEvent('strike'));
+  await w(300);
+  await page.locator('.event-card .event-choice').nth(1).click();
+  await w(300);
+  await dismissCards();
+  await enter(4.5, 18.6, /Enter Peckwell Broadway/);
+  await shot('25-tube-strike');
+  await page.keyboard.press('Escape');
+  await w(200);
+  await dbg(() => { const u = window.__ukl; u.engine.save.job = 'barista'; u.engine.save.jobXp = 25; u.handle([{ type: 'card', id: 'review' }]); });
+  await w(400);
+  await shot('26-event-card-promotion');
+  await dismissCards();
+  await dbg(() => { const u = window.__ukl; const k = u.london(Date.now() + u.getClockOffset()).dateKey; u.engine.save.uc = { claiming: true, appt: k, attended: false, searches: 1, weekEarned: 140, sanctioned: false }; });
+  await enter(36.5, 18.6, /Enter Jobcentre Minus/);
+  await page.getByRole('tab').first().click().catch(() => {});
+  await w(300);
+  await shot('27-jobcentre-uc');
+  await page.keyboard.press('Escape');
+  await w(200);
 
   // ---- leave for 9 hours, come back
   const [off, json] = await dbg(() => { const u = window.__ukl; u.writeSave(u.engine.save); const s = { ...u.engine.save, lastSeen: u.engine.save.lastSeen - 9 * 3600e3 }; return [u.getClockOffset(), JSON.stringify(s)]; });

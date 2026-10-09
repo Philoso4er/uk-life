@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-const useCountdown = (secs: number, running: boolean, onEnd: () => void) => {
+const useCountdown = (secs: number, running: boolean, onEnd: () => void, paused = false) => {
   const [left, setLeft] = useState(secs);
   const endRef = useRef(onEnd);
   endRef.current = onEnd;
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   useEffect(() => {
     if (!running) return;
-    const start = performance.now();
+    let remaining = secs;
+    let last = performance.now();
     const id = setInterval(() => {
-      const l = Math.max(0, secs - (performance.now() - start) / 1000);
-      setLeft(l);
-      if (l <= 0) {
+      const t = performance.now();
+      if (!pausedRef.current) remaining = Math.max(0, remaining - (t - last) / 1000);
+      last = t;
+      setLeft(remaining);
+      if (remaining <= 0) {
         clearInterval(id);
         endRef.current();
       }
@@ -52,7 +57,7 @@ const DRINKS = [
 const CUP_NAMES = [['Siobhan', 'Shivorn'], ['John', 'Jhon'], ['Mohammed', 'Mohamed'], ['Sarah', 'Sarah (no H)'], ['Xander', 'Zander'], ['Niamh', 'Neve'], ['Tarquin', 'Tarkwin'], ['Ngozi', 'Gozi'], ['Dave', 'Dave'], ['Ffion', 'Fion']];
 const COMPLAINTS = ['"I said OAT."', '"Is this... dairy?"', '"Erm, that’s not what I ordered, babe."', '"I’m literally lactose intolerant."', '"Can you start again? Sorry. Sorry."'];
 
-export function BaristaGame({ onDone }: { onDone: (score: number, summary: string) => void }) {
+export function BaristaGame({ onDone, paused = false }: { onDone: (score: number, summary: string) => void; paused?: boolean }) {
   const TOTAL = 35;
   const [order, setOrder] = useState(() => newOrder());
   const [progress, setProgress] = useState(0);
@@ -66,7 +71,7 @@ export function BaristaGame({ onDone }: { onDone: (score: number, summary: strin
     const n = servedRef.current;
     onDone(Math.min(1, n / 7), `${n} drink${n === 1 ? '' : 's'} served. ${n >= 7 ? 'Absolute machine.' : n >= 4 ? 'Solid shift.' : 'The queue is now out the door and round the corner.'}`);
   }, [onDone]);
-  const left = useCountdown(TOTAL, running, end);
+  const left = useCountdown(TOTAL, running, end, paused);
 
   function newOrder() {
     const d = DRINKS[Math.floor(Math.random() * DRINKS.length)];
@@ -74,7 +79,7 @@ export function BaristaGame({ onDone }: { onDone: (score: number, summary: strin
     return { ...d, customer: n[0], cup: n[1] };
   }
   const tap = (id: string) => {
-    if (!running) return;
+    if (!running || paused) return;
     if (order.steps[progress] === id) {
       if (progress + 1 >= order.steps.length) {
         servedRef.current += 1;
@@ -147,7 +152,7 @@ const EMAILS: { from: string; subject: string; answer: Ans }[] = [
   { from: 'CEO (definitely)', subject: 'Buy 10 gift cards, urgent, keep it secret', answer: 'report' },
 ];
 
-export function OfficeGame({ onDone }: { onDone: (score: number, summary: string) => void }) {
+export function OfficeGame({ onDone, paused = false }: { onDone: (score: number, summary: string) => void; paused?: boolean }) {
   const TOTAL = 35;
   const [mail, setMail] = useState(() => EMAILS[Math.floor(Math.random() * EMAILS.length)]);
   const [stats, setStats] = useState({ right: 0, wrong: 0 });
@@ -163,9 +168,9 @@ export function OfficeGame({ onDone }: { onDone: (score: number, summary: string
     const score = acc * Math.min(1, total / 10);
     onDone(score, `${right}/${total} emails handled correctly. ${score > 0.8 ? 'Linda says "great stuff" (highest honour).' : score > 0.45 ? 'Linda is "a little concerned".' : 'You replied-all to the yoghurt thread. Legend, but no.'}`);
   }, [onDone]);
-  const left = useCountdown(TOTAL, running, end);
+  const left = useCountdown(TOTAL, running, end, paused);
   const answer = (a: Ans) => {
-    if (!running) return;
+    if (!running || paused) return;
     const ok = a === mail.answer;
     setStats((s) => ({ right: s.right + (ok ? 1 : 0), wrong: s.wrong + (ok ? 0 : 1) }));
     setMsg(ok ? ['Nice.', 'Inbox zero is a myth but nice.', 'Efficient.', 'Linda would be proud.'][Math.floor(Math.random() * 4)] : mail.answer === 'report' ? 'That was phishing! IT are sending you on a course.' : mail.answer === 'reply' ? 'You ignored Linda. Linda noticed.' : 'You replied to a reply-all. Everyone hates you now.');
@@ -216,7 +221,7 @@ export function OfficeGame({ onDone }: { onDone: (score: number, summary: string
 // ------------------------------------------------------------------ bus driver
 const BUS_QUIPS = ['"Does this go to Peckwell?" (It says PECKWELL on the front.)', 'Someone taps their Oyster four times. "Is it working?"', 'A man boards with a full-size fridge freezer.', '"Cheers drive!" (×14)', 'A schoolkid rings the bell 37 times.', 'Somebody is eating a hot McDonald’s upstairs. Everyone knows.', 'A pensioner gives you a Werther’s Original. Best part of the day.'];
 
-export function BusGame({ onDone }: { onDone: (score: number, summary: string) => void }) {
+export function BusGame({ onDone, paused = false }: { onDone: (score: number, summary: string) => void; paused?: boolean }) {
   const STOPS = 6;
   const STOP_AT = 0.72;
   const [stop, setStop] = useState(0);
@@ -226,12 +231,14 @@ export function BusGame({ onDone }: { onDone: (score: number, summary: string) =
   const scores = useRef<number[]>([]);
   const posRef = useRef(0);
   const speedRef = useRef(0.32);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   useEffect(() => {
     if (phase !== 'driving') return;
     let raf = 0;
     let last = performance.now();
     const step = (now: number) => {
-      const dt = (now - last) / 1000;
+      const dt = pausedRef.current ? 0 : (now - last) / 1000;
       last = now;
       posRef.current += speedRef.current * dt;
       if (posRef.current > 1.05) {
@@ -247,7 +254,7 @@ export function BusGame({ onDone }: { onDone: (score: number, summary: string) =
   }, [phase, stop]);
 
   const brake = () => {
-    if (phase !== 'driving') return;
+    if (phase !== 'driving' || pausedRef.current) return;
     const err = Math.abs(posRef.current - STOP_AT);
     const s = Math.max(0, 1 - err / 0.16);
     scores.current.push(s);
