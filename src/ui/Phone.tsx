@@ -8,6 +8,7 @@ import { CONTACTS, PERSONAS, contactAuthor } from '../game/npcs';
 import type { Author, Post, SocialSnapshot } from '../game/social';
 import { DOW_LONG, RENT_HOUR, fmtDuration, london, msUntilRent } from '../game/time';
 import type { SaveState } from '../game/types';
+import { audioSettings, sfx } from '../game/audio';
 import { MAX_DM, MAX_POST } from '../net/filter';
 import { avatarUrl } from './avatarUrl';
 
@@ -687,8 +688,24 @@ function Me({ save, snap }: { save: SaveState; snap: Snapshot }) {
 }
 
 function Settings({ engine, social, onQuit, onReset }: { engine: Engine; social: SocialSnapshot; onQuit: () => void; onReset: () => void }) {
+  const audio = useSyncExternalStore(audioSettings.subscribe, () => `${audioSettings.sound}|${audioSettings.haptics}`);
+  const [soundOn, hapticsOn] = audio.split('|').map((x) => x === 'true');
   return (
     <div className="app-pad">
+      <label className="toggle-row">
+        <span>
+          <b>Sound</b>
+          <span className="muted small">Rain, footsteps, the Tube chime, the till. Quiet and synthesised.</span>
+        </span>
+        <input type="checkbox" aria-label="Sound" checked={soundOn} onChange={(e) => audioSettings.setSound(e.target.checked)} />
+      </label>
+      <label className="toggle-row">
+        <span>
+          <b>Vibration</b>
+          <span className="muted small">A little buzz for messages and purchases (phones that support it).</span>
+        </span>
+        <input type="checkbox" aria-label="Vibration" checked={hapticsOn} onChange={(e) => audioSettings.setHaptics(e.target.checked)} />
+      </label>
       <label className="toggle-row">
         <span>
           <b>Messages from players</b>
@@ -768,6 +785,7 @@ function Shop({ engine, onEvents, toast }: { engine: Engine; onEvents: (ev: Game
                   const out: GameEvent[] = [];
                   const why = buyStatus(save, it.id, out);
                   if (why) return toast(why, 'bad');
+                  sfx.till();
                   onEvents(out);
                   force((n) => n + 1);
                 }}

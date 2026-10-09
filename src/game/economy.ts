@@ -1,5 +1,6 @@
 import type { Avatar, GoalId, HomeId, JobId, SaveState, SkillId } from './types';
 import { SPAWN } from './world';
+import { sanitizeAvatar } from './avatar';
 import { addDays, london, now, rentKey } from './time';
 import { addMoodlet, applyFx, clamp, passTime } from './needs';
 
@@ -167,7 +168,7 @@ export function newSave(name: string, avatar: Avatar): SaveState {
     heating: false,
     damp: 0,
     lastDailyKey: london(t).dateKey,
-    flags: {},
+    flags: { guide: 'on' }, // brand-new players get the first-session guide (older saves don't)
     eventLog: {},
     nextEventAt: t + 3 * 60000,
     uc: { claiming: false, appt: '', attended: false, searches: 0, weekEarned: 0, sanctioned: false },
@@ -226,8 +227,13 @@ export function migrate(raw: unknown): SaveState | null {
     };
     raw = migrated;
   }
+  const hadGuide = isObj(raw) && isObj((raw as Record<string, unknown>).flags) && 'guide' in ((raw as Record<string, unknown>).flags as object);
   const s = fillDefaults(base, raw);
   s.version = 2;
+  // the first-session guide is only for brand-new characters, not people who've been here a while
+  if (!hadGuide) delete s.flags.guide;
+  // avatars from older versions get the new fields (beard) and lose anything unknown
+  s.avatar = sanitizeAvatar(s.avatar);
   if (!(s.home in HOMES)) s.home = 'sofa';
   if (s.job && !(s.job in JOBS)) s.job = null;
   s.jobLevel = Math.max(1, Math.min(5, Math.round(s.jobLevel)));
@@ -367,7 +373,22 @@ export interface TickCtx {
 }
 
 /** Hooks other systems register for once-a-day / every-tick processing. */
-export const dailyHooks: ((s: SaveState, out: GameEvent[], dayKey: string) => void)[] = [];
+/** `missed` is true for days that went by while you weren't playing (replayed gently on your return). */
+export const dailyHooks: ((s: SaveState, out: GameEvent[], dayKey: string, missed?: boolean) => void)[] = [];
+/** Most missed days we replay after a long absence. */
+export const MAX_MISSED_DAYS = 13;
+
+/** Run the daily hooks for every day since the last one we processed (missed days first, then today). */
+export function runDailies(s: SaveState, out: GameEvent[], today: string) {
+  if (s.lastDailyKey === today) return;
+  const missed: string[] = [];
+  if (s.lastDailyKey && s.lastDailyKey < today) {
+    for (let k = addDays(s.lastDailyKey, 1); k < today && missed.length < 400; k = addDays(k, 1)) missed.push(k);
+  }
+  s.lastDailyKey = today;
+  for (const k of missed.slice(-MAX_MISSED_DAYS)) dailyHooks.forEach((fn) => fn(s, out, k, true));
+  dailyHooks.forEach((fn) => fn(s, out, today, false));
+}
 export const tickHooks: ((s: SaveState, ctx: TickCtx, out: GameEvent[]) => void)[] = [];
 
 export function tick(s: SaveState, ctx: TickCtx, out: GameEvent[]) {
@@ -383,10 +404,7 @@ export function tick(s: SaveState, ctx: TickCtx, out: GameEvent[]) {
   if (s.energy <= 0) out.push({ type: 'passout' });
   s.lastSeen = t;
   const today = london(t).dateKey;
-  if (s.lastDailyKey !== today) {
-    s.lastDailyKey = today;
-    dailyHooks.forEach((fn) => fn(s, out, today));
-  }
+  runDailies(s, out, today);
   checkStreak(s, out, t);
   processBills(s, out, t);
   tickHooks.forEach((fn) => fn(s, ctx, out));

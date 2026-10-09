@@ -6,6 +6,7 @@ import { london } from '../game/time';
 import type { SaveState } from '../game/types';
 import type { Building } from '../game/world';
 import { Modal } from './Dialogs';
+import { sfx } from '../game/audio';
 
 export interface PlaceTab {
   id: string;
@@ -71,6 +72,7 @@ export function PlaceDialog({
     }
     const out: GameEvent[] = [];
     const o = completeAction(save, run.a, c, out);
+    if (o.deltas.some((d) => d.money && d.v < 0)) sfx.till();
     setResult({ a: run.a, o });
     onEvents(out.filter((e) => e.type !== 'moodlet'));
   };

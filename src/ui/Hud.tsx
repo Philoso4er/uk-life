@@ -19,7 +19,7 @@ function Bar({ icon, label, value, wide }: { icon: string; label: string; value:
 
 const moodFace = (m: number) => (m >= 80 ? '😄' : m >= 60 ? '🙂' : m >= 40 ? '😐' : m >= 20 ? '😕' : '😩');
 
-export function Hud({ snap, save, onCancelDelivery, onOpenMe }: { snap: Snapshot; save: SaveState; onCancelDelivery: () => void; onOpenMe: () => void }) {
+export function Hud({ snap, save, onCancelDelivery, onOpenMe, children }: { snap: Snapshot; save: SaveState; onCancelDelivery: () => void; onOpenMe: () => void; children?: React.ReactNode }) {
   const c = london(snap.now);
   const night = c.hh < 6 || c.hh >= 20;
   const weather = snap.raining ? '🌧️' : night ? '🌙' : c.hh < 9 ? '🌤️' : '⛅';
@@ -91,6 +91,7 @@ export function Hud({ snap, save, onCancelDelivery, onOpenMe }: { snap: Snapshot
           </button>
         </div>
       ) : null}
+      {children}
     </div>
   );
 }

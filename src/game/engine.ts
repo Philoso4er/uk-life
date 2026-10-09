@@ -1,21 +1,24 @@
-import { drawAvatar } from './avatar';
-import { makeBots, updateBot, type Bot } from './bots';
+import { drawAvatar, walkFrame } from './avatar';
+import { setRainLevel, sfx } from './audio';
+import { makeBots, makeWalkers, updateBot, type Bot } from './bots';
+import { ROADS, ZEBRAS, hitsAnyVehicle, stepVehicles, vehHalfW, zebraAt, type Car, type Person } from './traffic';
 import { catchUp, tick, type GameEvent } from './economy';
 import { activeMoodlets, effectiveMood } from './needs';
 import { london, now as realNow } from './time';
 import { SocialStore } from './social';
 import { NpcBrain } from './npcs';
 import { findPath } from './pathfind';
-import { FONT, billboardAt, drawBillboard, drawPigeon, drawTrain, drawVehicle, makeGlow, prerenderWorld, type Vehicle } from './render';
+import { FONT, billboardAt, drawBillboard, drawPigeon, drawTrain, drawVehicle, makeGlow, prerenderWorld } from './render';
 import type { Facing, JobId, SaveState, HomeId, GoalId } from './types';
-import { H, TILE, W, billboards, buildings, deliveryDoors, doorFront, inPark, isSolid, lamps, buildingById, places, spots, type Billboard, type Building } from './world';
+import { H, T, TILE, W, billboards, buildings, deliveryDoors, doorFront, inPark, isSolid, lamps, buildingById, places, spots, tiles, type Billboard, type Building } from './world';
 import type { NetMode, PlayerState, Transport } from '../net/types';
 
 export interface EngineCallbacks {
   onInteract(b: Building): void;
   onBillboard(bb: Billboard): void;
   onEvents(ev: GameEvent[]): void;
-  onDeliveryDone(earned: number, onTime: number, total: number): void;
+  /** `done` = drops actually made; `cancelled` when you bailed out early */
+  onDeliveryDone(earned: number, onTime: number, total: number, done: number, cancelled: boolean): void;
   onIncoming?(kind: 'dm' | 'post', from: string, text: string): void;
 }
 
@@ -96,7 +99,8 @@ export class Engine {
   private keys = new Set<string>();
   bots: Bot[] = [];
   private remotes = new Map<string, Remote>();
-  private vehicles: Vehicle[] = [];
+  /** public for debug tooling (shots scripts) */
+  vehicles: Car[] = [];
   private pigeons: Pigeon[] = [];
   private train = { x: -9999, next: 6 };
   private drops: { x: number; y: number; l: number; s: number }[] = [];
@@ -174,8 +178,9 @@ export class Engine {
     this.raf = requestAnimationFrame(this.frame);
     this.transport = transport;
     this.netMode = transport.mode;
-    this.bots = makeBots(transport.mode === 'online' ? 4 : 8);
-    for (const b of this.bots) this.brain.setAvatar(b.name, b.avatar);
+    const regulars = makeBots(transport.mode === 'online' ? 4 : 8, [this.save.name]);
+    for (const b of regulars) this.brain.setAvatar(b.name, b.avatar);
+    this.bots = [...regulars, ...makeWalkers(transport.mode === 'online' ? 4 : 6)];
     this.social.sender = (m) => this.transport?.sendSocial(m);
     this.social.onIncoming = (kind, a, text) => this.cb.onIncoming?.(kind, a.name, text);
     const out: GameEvent[] = [];
@@ -314,11 +319,18 @@ export class Engine {
   }
 
   walkTo(x: number, y: number, pending: string | null = null) {
-    const path = findPath(this.player.x, this.player.y, x, y);
+    const path = findPath(this.player.x, this.player.y, x, y, 'player');
     this.player.path = path ?? [];
     this.player.pending = path ? pending : null;
     this.player.stuck = 0;
   }
+
+  /** First-session guide: point at this building (null to stop). */
+  setGuideTarget(id: string | null) {
+    this.guideTarget = id ? buildingById(id) ?? null : null;
+  }
+  private guideTarget: Building | null = null;
+  private lastWalkFrame = -1;
 
   interactNearby() {
     if (this.nearby && !this.paused) this.cb.onInteract(this.nearby);
@@ -337,7 +349,7 @@ export class Engine {
     const b = buildingById(placeId);
     if (!b) return 0;
     const f = doorFront(b);
-    let n = this.bots.filter((x) => Math.hypot(x.x - f.x, x.y - f.y) < r).length;
+    let n = this.bots.filter((x) => !x.ambient && Math.hypot(x.x - f.x, x.y - f.y) < r).length;
     for (const x of this.remotes.values()) if (Math.hypot(x.rx - f.x, x.ry - f.y) < r) n++;
     return n;
   }
@@ -363,7 +375,7 @@ export class Engine {
     if (!this.delivery) return;
     const d = this.delivery;
     this.delivery = null;
-    this.cb.onDeliveryDone(d.earned, d.onTime, d.stops.length);
+    this.cb.onDeliveryDone(d.earned, d.onTime, d.stops.length, d.index, true);
   }
   private setDropTimer(fx: number, fy: number) {
     const d = this.delivery!;
@@ -536,13 +548,21 @@ export class Engine {
       const my = (vy / len) * step;
       const ox = p.x;
       const oy = p.y;
-      if (!this.blocked(p.x + mx, p.y)) p.x += mx;
-      if (!this.blocked(p.x, p.y + my)) p.y += my;
+      let carBlocked = false;
+      const car = (x: number, y: number) => {
+        // never walk into a vehicle (but always allow stepping out of one)
+        const hit = hitsAnyVehicle(this.vehicles, x, y) && !hitsAnyVehicle(this.vehicles, p.x, p.y);
+        if (hit) carBlocked = true;
+        return hit;
+      };
+      if (!this.blocked(p.x + mx, p.y) && !car(p.x + mx, p.y)) p.x += mx;
+      if (!this.blocked(p.x, p.y + my) && !car(p.x, p.y + my)) p.y += my;
       p.x = Math.max(0.4, Math.min(W - 0.4, p.x));
       p.y = Math.max(0.4, Math.min(H - 0.2, p.y));
       const moved = Math.hypot(p.x - ox, p.y - oy);
       if (p.path.length && moved < step * 0.2) {
-        p.stuck += dt;
+        // waiting for a bus to pass isn't "stuck"; only give up if it's been a while
+        p.stuck += carBlocked ? dt * 0.15 : dt;
         if (p.stuck > 0.6) {
           p.path = [];
           p.pending = null;
@@ -550,6 +570,10 @@ export class Engine {
         }
       } else p.stuck = 0;
       p.moving = moved > 0.0005;
+      // footsteps land on frames 0 and 4 of the walk cycle
+      const wf = walkFrame(this.t);
+      if (p.moving && !this.delivery && wf !== this.lastWalkFrame && (wf === 0 || wf === 4)) sfx.step(tiles[Math.floor(p.y) * W + Math.floor(p.x)] === T.Grass ? 'grass' : 'pave');
+      this.lastWalkFrame = wf;
       if (Math.abs(vx) > Math.abs(vy) * 1.1) p.facing = vx > 0 ? 'right' : 'left';
       else p.facing = vy > 0 ? 'down' : 'up';
       this.save.pos.x = p.x;
@@ -566,6 +590,7 @@ export class Engine {
       tick(this.save, { raining: this.raining, outdoors: !this.indoors, inPark: inPark(p.x, p.y), onShift: !!this.delivery, dtMs, active: !this.paused }, events);
       this.social.pump(Date.now());
       if (this.bots.length) this.brain.tick(this.npcCtx());
+      setRainLevel(this.rainLevel * (this.indoors ? 0.3 : 1));
       if (tNow > this.weatherAt) {
         if (this.weatherAt) this.rollWeather();
         this.weatherAt = tNow + 120000;
@@ -587,7 +612,7 @@ export class Engine {
         d.index++;
         if (d.index >= d.stops.length) {
           this.delivery = null;
-          this.cb.onDeliveryDone(d.earned, d.onTime, d.stops.length);
+          this.cb.onDeliveryDone(d.earned, d.onTime, d.stops.length, d.stops.length, false);
         } else this.setDropTimer(p.x, p.y);
       }
       this.dirty = true;
@@ -610,7 +635,8 @@ export class Engine {
     }
 
     // ---- NPCs & remote players
-    for (const b of this.bots) updateBot(b, dt);
+    const street = { vehicles: this.vehicles };
+    for (const b of this.bots) updateBot(b, dt, street);
     const now = performance.now();
     for (const [id, r] of this.remotes) {
       const k = Math.min(1, dt * 10);
@@ -679,13 +705,14 @@ export class Engine {
 
   // ------------------------------------------------------------ ambient life
   private initVehicles() {
-    const v = (x: number, dir: 1 | -1, road: 'high' | 'albion', kind: Vehicle['kind'], color: string, speed: number): Vehicle => ({
+    const v = (x: number, dir: 1 | -1, road: 'high' | 'albion', kind: Car['kind'], color: string, speed: number): Car => ({
       x,
       dir,
       y: road === 'high' ? (dir > 0 ? 20.5 : 21.5) : dir > 0 ? 10.5 : 11.5, // they drive on the LEFT here
       kind,
       color,
       speed,
+      cur: speed,
     });
     this.vehicles = [
       v(6, -1, 'high', 'bus', '#d42020', 4.2),
@@ -696,6 +723,7 @@ export class Engine {
       v(55, 1, 'high', 'cab', '#1b1b1b', 5.4),
       v(30, -1, 'albion', 'car', '#2f8f4e', 3.6),
       v(10, 1, 'albion', 'car', '#9b59b6', 3.9),
+      v(45, 1, 'albion', 'van', '#c0c6cc', 3.4),
     ];
   }
 
@@ -704,42 +732,36 @@ export class Engine {
     this.pigeons = spots.map(([x, y], i) => ({ x, y, fly: 0, vx: 0, vy: 0, flip: i % 2 === 0, phase: Math.random() * 6 }));
   }
 
-  private entitiesNear(x0: number, x1: number, y0: number, y1: number) {
-    const inside = (x: number, y: number) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
-    if (inside(this.player.x, this.player.y)) return true;
-    if (this.bots.some((b) => inside(b.x, b.y))) return true;
-    for (const r of this.remotes.values()) if (inside(r.rx, r.ry)) return true;
-    return false;
+  /** Everyone on foot, for the drivers. */
+  private pedestrians(): Person[] {
+    const out: Person[] = [{ x: this.player.x, y: this.player.y }];
+    for (const b of this.bots) out.push(b);
+    for (const r of this.remotes.values()) out.push({ x: r.rx, y: r.ry });
+    return out;
+  }
+
+  /** Someone's on a zebra, or waiting at its kerb wanting to cross: traffic should stop. */
+  private zebraDemand(): boolean[] {
+    const p = this.player;
+    return ZEBRAS.map((z, i) => {
+      const rd = ROADS[z.road];
+      const inX = (x: number) => x >= z.x0 - 0.15 && x < z.x1 + 0.15;
+      const onIt = (x: number, y: number) => inX(x) && y >= rd.y0 - 0.1 && y < rd.y1 + 0.1;
+      if (onIt(p.x, p.y)) return true;
+      // you at the kerb, facing the road
+      if (inX(p.x) && ((p.y >= rd.y0 - 0.9 && p.y < rd.y0 && p.facing === 'down') || (p.y >= rd.y1 && p.y < rd.y1 + 0.9 && p.facing === 'up'))) return true;
+      for (const b of this.bots) {
+        if (onIt(b.x, b.y)) return true;
+        if (b.waitRoad === z.road && zebraAt(b.x, z.road) === i) return true;
+      }
+      for (const r of this.remotes.values()) if (onIt(r.rx, r.ry)) return true;
+      return false;
+    });
   }
 
   private updateAmbient(dt: number) {
-    // vehicles: keep distance, stop at zebras when someone's crossing
-    const zebras = [10, 30];
-    const zebraBusy = zebras.map((zx) => this.entitiesNear(zx - 0.1, zx + 2.1, 19.7, 22.3));
-    for (const v of this.vehicles) {
-      const half = v.kind === 'bus' ? 1.7 : v.kind === 'van' ? 0.95 : 0.75;
-      let target = v.speed;
-      const front = v.x + v.dir * half;
-      if (v.y > 15) {
-        zebras.forEach((zx, i) => {
-          const zc = zx + 1;
-          const ahead = (zc - front) * v.dir;
-          if (zebraBusy[i] && ahead > 0.6 && ahead < 2.4) target = 0;
-        });
-      }
-      for (const o of this.vehicles) {
-        if (o === v || o.y !== v.y) continue;
-        const ahead = (o.x - v.x) * v.dir;
-        const ohalf = o.kind === 'bus' ? 1.7 : o.kind === 'van' ? 0.95 : 0.75;
-        if (ahead > 0 && ahead < half + ohalf + 0.8) target = Math.min(target, 0);
-      }
-      const cur = (v as Vehicle & { cur?: number }).cur ?? v.speed;
-      const next = cur + Math.sign(target - cur) * Math.min(Math.abs(target - cur), dt * 6);
-      (v as Vehicle & { cur?: number }).cur = next;
-      v.x += v.dir * next * dt;
-      if (v.dir > 0 && v.x > W + 4) v.x = -4;
-      if (v.dir < 0 && v.x < -4) v.x = W + 4;
-    }
+    // traffic: brake for anyone in the road, stop at zebras when someone's crossing or waiting
+    stepVehicles(this.vehicles, this.pedestrians(), this.zebraDemand(), dt);
     // pigeons
     for (const g of this.pigeons) {
       if (g.fly > 0) {
@@ -806,7 +828,6 @@ export class Engine {
     const vis = (x: number, y: number, m = 80) => x > left - m && x < viewR + m && y > top - m && y < viewB + m;
 
     if (this.train.x > -9000) drawTrain(ctx, this.train.x);
-    for (const v of this.vehicles) if (vis(v.x * TILE, v.y * TILE, 140)) drawVehicle(ctx, v);
 
     // tap marker
     // spot markers (park bits, bus stop)
@@ -845,6 +866,32 @@ export class Engine {
       ctx.fillRect(s.x * TILE - 4, s.y * TILE - 58 + bounce, 8, 12);
     }
 
+    // guide arrow bobbing over the door you're meant to go to
+    const gt = !this.delivery && this.guideTarget ? doorFront(this.guideTarget) : null;
+    if (gt && this.nearby !== this.guideTarget) {
+      const bounce = Math.abs(Math.sin(this.t * 3.2)) * -7;
+      const gx = gt.x * TILE;
+      const gy = gt.y * TILE - 30 + bounce;
+      ctx.fillStyle = 'rgba(255,210,63,0.28)';
+      ctx.beginPath();
+      ctx.ellipse(gx, gt.y * TILE, 16, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffd23f';
+      ctx.strokeStyle = '#3a2a00';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(gx - 9, gy - 12);
+      ctx.lineTo(gx - 4, gy - 12);
+      ctx.lineTo(gx - 4, gy - 22);
+      ctx.lineTo(gx + 4, gy - 22);
+      ctx.lineTo(gx + 4, gy - 12);
+      ctx.lineTo(gx + 9, gy - 12);
+      ctx.lineTo(gx, gy);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fill();
+    }
+
     for (const bb of billboards) if (vis(bb.x * TILE, bb.y * TILE, 200)) drawBillboard(ctx, bb, this.t, this.hoverBillboard === bb.id);
 
     // pigeons (grounded)
@@ -872,10 +919,10 @@ export class Engine {
         draw: () => {
           ctx.save();
           ctx.translate(b.x * TILE, b.y * TILE);
-          drawAvatar(ctx, b.avatar, { facing: b.facing, moving: b.moving, t: this.t + b.speed * 3 });
+          drawAvatar(ctx, b.avatar, { facing: b.facing, moving: b.moving, t: this.t + b.speed * 3, phone: !b.moving && b.wait > 0 && b.phone });
           ctx.restore();
         },
-        tag: () => this.nameTag(b.x, b.y, b.name, 'npc', b.bubble),
+        tag: () => (b.ambient ? undefined : this.nameTag(b.x, b.y, b.name, 'npc', b.bubble)),
       });
     }
     for (const r of this.remotes.values()) {
@@ -890,6 +937,10 @@ export class Engine {
         },
         tag: () => this.nameTag(r.rx, r.ry, r.p.name, 'player', r.bubble),
       });
+    }
+    for (const v of this.vehicles) {
+      if (!vis(v.x * TILE, v.y * TILE, 140)) continue;
+      ents.push({ y: v.y + vehHalfW(v.kind), draw: () => drawVehicle(ctx, v), tag: () => {} });
     }
     ents.sort((a, b) => a.y - b.y);
     for (const e of ents) e.draw();
@@ -935,9 +986,10 @@ export class Engine {
       ctx.stroke();
     }
 
-    // off-screen delivery arrow
-    if (this.delivery) {
-      const s = this.delivery.stops[this.delivery.index];
+    // off-screen pointer to the delivery drop (or the guide's next stop)
+    const pointAt = this.delivery ? this.delivery.stops[this.delivery.index] : gt;
+    if (pointAt) {
+      const s = pointAt;
       const sx = (s.x * TILE - left) * this.zoom;
       const sy = (s.y * TILE - top) * this.zoom;
       const m = 40;
@@ -950,8 +1002,8 @@ export class Engine {
         ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
         ctx.translate(ex, ey);
         ctx.rotate(a);
-        ctx.fillStyle = '#19a974';
-        ctx.strokeStyle = '#fff';
+        ctx.fillStyle = this.delivery ? '#19a974' : '#ffd23f';
+        ctx.strokeStyle = this.delivery ? '#fff' : '#3a2a00';
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(18, 0);

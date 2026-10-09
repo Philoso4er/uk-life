@@ -34,6 +34,8 @@ export interface ActionDef {
   cooldown?: number;
   /** London opening hours [from, to); wraps past midnight if from > to */
   hours?: [number, number];
+  /** still available when the building itself is shut (online, a board in the window…) */
+  anytime?: boolean;
   outdoors?: boolean;
   gig?: [number, number];
   goal?: GoalId;
@@ -60,6 +62,15 @@ const openNow = (h: [number, number] | undefined, t: LondonTime) => {
   return a < b ? t.hh >= a && t.hh < b : t.hh >= a || t.hh < b;
 };
 const hh = (n: number) => `${String(n % 24).padStart(2, '0')}:00`;
+
+/** Buildings that shut as a whole (every action inside, unless it's marked `anytime`). */
+export const PLACE_HOURS: Record<string, { hours: [number, number]; days: number[]; label: string }> = {
+  jobcentre: { hours: [9, 17], days: [0, 1, 2, 3, 4], label: 'Mon–Fri, 9am–5pm' },
+};
+export function placeOpen(placeId: string, t: LondonTime) {
+  const ph = PLACE_HOURS[placeId];
+  return !ph || (ph.days.includes(t.dayIdx) && openNow(ph.hours, t));
+}
 const member = (s: SaveState) => s.owned.items.includes('gym');
 const todayCount = (s: SaveState, key: string) => {
   const k = `${key}:${london().dateKey}`;
@@ -169,11 +180,11 @@ export const ACTIONS: ActionDef[] = [
   A({ id: 'tactics', place: 'bookies', emoji: '🗣️', label: 'Talk tactics with the regulars', note: 'Free. Opinions guaranteed.', mins: 20, fx: { social: 14 }, skill: ['charm', 0.1], lines: ['A man in a flat cap explained the offside rule using salt and vinegar packets.'] }),
 
   // ------------------------------------------------------------ Jobcentre Minus
-  A({ id: 'ucclaim', place: 'jobcentre', emoji: '📝', label: 'Start a Universal Credit-ish claim', note: `About £92/wk + help with rent. 55% taper on earnings over £100/wk. Weekly work coach appointments, ${UC_SEARCHES} job searches a week.`, mins: 60, hidden: (s) => s.uc.claiming, progress: ['Creating an account…', 'Verifying your identity (a photo of your passport, your face, and your soul)…', 'Answering “have you ever been a goat farmer?”…', 'Submitted!'], lines: [''], run: (s, _c, out) => { ucFns.claim(s); out.push({ type: 'phone', from: 'Universal Credit-ish journal', text: `Welcome to your journal. Your first work coach appointment is ${s.uc.appt} at Jobcentre Minus (any time that day). Commitments: ${UC_SEARCHES} job searches a week (library Wi-Fi or the job board). Payments land on Mondays.`, tone: 'info', quiet: true }); return `Claim made. Your work coach is Sandra. First appointment: ${s.uc.appt}. Don’t miss it, or it’s a sanction.`; } }),
+  A({ id: 'ucclaim', place: 'jobcentre', emoji: '📝', label: 'Start a Universal Credit-ish claim', anytime: true, note: `Online, any time. About £92/wk + help with rent. 55% taper on earnings over £100/wk. Weekly work coach appointments, ${UC_SEARCHES} job searches a week.`, mins: 60, hidden: (s) => s.uc.claiming, progress: ['Creating an account…', 'Verifying your identity (a photo of your passport, your face, and your soul)…', 'Answering “have you ever been a goat farmer?”…', 'Submitted!'], lines: [''], run: (s, _c, out) => { ucFns.claim(s); out.push({ type: 'phone', from: 'Universal Credit-ish journal', text: `Welcome to your journal. Your first work coach appointment is ${s.uc.appt} at Jobcentre Minus (any time between 9am and 5pm). Commitments: ${UC_SEARCHES} job searches a week (library Wi-Fi or the job board). Payments land on Mondays.`, tone: 'info', quiet: true }); return `Claim made. Your work coach is Sandra. First appointment: ${s.uc.appt}. Don’t miss it, or it’s a sanction.`; } }),
   A({ id: 'ucappt', place: 'jobcentre', emoji: '🤝', label: 'Work coach appointment with Sandra', note: 'Today! Counts as a job search too.', mins: 30, hidden: (s, c) => !s.uc.claiming || s.uc.appt !== c.t.dateKey, fx: { social: 8 }, progress: ['“Take a seat.”', '“So… how’s the job search going?”', 'Sandra types for a very long time…'], lines: [''], run: (s) => { ucFns.attend(s); return pick(['Sandra asked if you’d “considered a career in logistics”. You have now. Next appointment: one week.', 'Sandra was lovely. She showed you a photo of her cat. You agreed to apply for three jobs. Next appointment: one week.', 'Sandra said your CV “has a lot of white space”. Fair. Next appointment: one week.']) + (s.flags.cv ? ' She liked that you printed your CV.' : ''); } }),
-  A({ id: 'ucstatus', place: 'jobcentre', emoji: '💷', label: 'Check your claim', note: 'This week’s estimate.', mins: 4, hidden: (s) => !s.uc.claiming, lines: [''], run: (s) => { const a = ucAward(s); return `This week: £${a.base} standard${a.housing ? ` + £${a.housing} housing` : ''}${a.taper ? ` − £${a.taper.toFixed(2)} taper (you earned £${s.uc.weekEarned.toFixed(2)})` : ''}${a.sanction ? ` − £${a.sanction} sanction` : ''} = £${a.total.toFixed(2)}, paid Monday. Job searches: ${s.uc.searches}/${UC_SEARCHES}. Next appointment: ${s.uc.appt}.`; } }),
-  A({ id: 'ucclose', place: 'jobcentre', emoji: '🚪', label: 'Close your claim', note: 'Off you go.', mins: 10, hidden: (s) => !s.uc.claiming, lines: ['Sandra said “good luck, love”. She meant it.'], run: (s) => { ucFns.close(s); } }),
-  A({ id: 'jobboard', place: 'jobcentre', emoji: '📋', label: 'Browse the job board', note: 'Counts as a job search.', mins: 20, cooldown: 10, skill: ['brains', 0.05], lines: ['“Wanted: Self-starter. Must start themself.” Riveting.', 'One job listing is from 2014. You applied anyway.'], run: (s) => { s.uc.searches++; } }),
+  A({ id: 'ucstatus', place: 'jobcentre', emoji: '💷', label: 'Check your claim', anytime: true, note: 'Online. This week’s estimate.', mins: 4, hidden: (s) => !s.uc.claiming, lines: [''], run: (s) => { const a = ucAward(s); return `This week: £${a.base} standard${a.housing ? ` + £${a.housing} housing` : ''}${a.taper ? ` − £${a.taper.toFixed(2)} taper (you earned £${s.uc.weekEarned.toFixed(2)})` : ''}${a.sanction ? ` − £${a.sanction} sanction` : ''} = £${a.total.toFixed(2)}, paid Monday. Job searches: ${s.uc.searches}/${UC_SEARCHES}. Next appointment: ${s.uc.appt}.`; } }),
+  A({ id: 'ucclose', place: 'jobcentre', emoji: '🚪', label: 'Close your claim', anytime: true, note: 'Off you go.', mins: 10, hidden: (s) => !s.uc.claiming, lines: ['Sandra said “good luck, love”. She meant it.'], run: (s) => { ucFns.close(s); } }),
+  A({ id: 'jobboard', place: 'jobcentre', emoji: '📋', label: 'Browse the job board', anytime: true, note: 'It’s in the window, so any time. Counts as a job search.', mins: 20, cooldown: 10, skill: ['brains', 0.05], lines: ['“Wanted: Self-starter. Must start themself.” Riveting.', 'One job listing is from 2014. You applied anyway.'], run: (s) => { s.uc.searches++; } }),
   A({ id: 'ticket', place: 'jobcentre', emoji: '🎟️', label: 'Take a ticket and wait', note: 'You are #412. Now serving: #9.', mins: 60, fx: { social: 6, mood: -2 }, lines: ['Number 9… 10… 412! That’s you! They’ve gone to lunch.', 'You made friends with a man called Den. Den has been here since Tuesday.'] }),
   A({ id: 'jcoffee', place: 'jobcentre', emoji: '☕', label: 'Free coffee machine', note: 'Free!', mins: 5, cooldown: 15, lines: ['It’s broken. It’s been broken since 2012. You pressed the button anyway. Hope is free.'] }),
 
@@ -256,6 +267,7 @@ export const actionCost = (s: SaveState, a: ActionDef, c: ActionCtx) => (a.costF
 
 /** Why you can't do it right now (or null if you can). */
 export function blockReason(s: SaveState, a: ActionDef, c: ActionCtx, t = now()): string | null {
+  if (!a.anytime && typeof a.place === 'string' && !placeOpen(a.place, c.t)) return `Shut. Open ${PLACE_HOURS[a.place].label}. It’s ${c.t.label}.`;
   if (!openNow(a.hours, c.t)) return `Open ${hh(a.hours![0])}–${hh(a.hours![1])}. It’s ${c.t.label.slice(4)}.`;
   const cd = s.cooldowns[a.id] ?? 0;
   if (cd > t) return `Done that recently. Again in ${Math.ceil((cd - t) / 60000)} min.`;

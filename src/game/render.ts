@@ -185,8 +185,9 @@ function drawStreetMarkings(ctx: CanvasRenderingContext2D) {
   ctx.fillStyle = '#f2f2f2';
   for (let x = 0; x < W * TILE; x += 40) {
     if (x > 22 * TILE && x < 26 * TILE) continue;
-    ctx.fillRect(x, 21 * TILE - 1.5, 22, 3);
-    ctx.fillRect(x, 11 * TILE - 1.5, 22, 3);
+    const zeb = (x0: number) => x + 22 > x0 * TILE - 6 && x < (x0 + 2) * TILE + 6;
+    if (!zeb(10) && !zeb(30)) ctx.fillRect(x, 21 * TILE - 1.5, 22, 3);
+    if (!zeb(29)) ctx.fillRect(x, 11 * TILE - 1.5, 22, 3);
   }
   for (let y = 3 * TILE; y < H * TILE; y += 40) {
     if ((y > 9 * TILE && y < 12 * TILE) || (y > 19.5 * TILE && y < 22.5 * TILE)) continue;
@@ -202,6 +203,20 @@ function drawStreetMarkings(ctx: CanvasRenderingContext2D) {
   ctx.fillStyle = '#f7f7f7';
   for (let i = 0; i < 8; i++) ctx.fillRect(30 * TILE + 4, 20 * TILE + 2 + i * 8, 2 * TILE - 8, 4);
   for (let i = 0; i < 8; i++) ctx.fillRect(10 * TILE + 4, 20 * TILE + 2 + i * 8, 2 * TILE - 8, 4);
+  for (let i = 0; i < 8; i++) ctx.fillRect(29 * TILE + 4, 10 * TILE + 2 + i * 8, 2 * TILE - 8, 4);
+  // zig-zags on the approach to each zebra
+  ctx.strokeStyle = '#f7f7f7';
+  ctx.lineWidth = 1.5;
+  for (const [zx, yTop] of [[10, 20], [30, 20], [29, 10]]) {
+    for (const side of [-1, 1]) {
+      for (const yy of [yTop * TILE + 3, (yTop + 2) * TILE - 3]) {
+        ctx.beginPath();
+        const x0 = side < 0 ? zx * TILE - 4 - 64 : (zx + 2) * TILE + 4;
+        for (let k = 0; k <= 8; k++) ctx.lineTo(x0 + k * 8, yy + (k % 2 ? 2.5 : -2.5) * (yy < (yTop + 1) * TILE ? 1 : -1));
+        ctx.stroke();
+      }
+    }
+  }
   for (let i = 0; i < 8; i++) ctx.fillRect(23 * TILE + 2 + i * 8, 28 * TILE + 4, 4, TILE - 8);
   // "LOOK RIGHT"
   ctx.font = `700 9px ${FONT}`;
@@ -209,6 +224,7 @@ function drawStreetMarkings(ctx: CanvasRenderingContext2D) {
   ctx.fillStyle = '#f7f7f7';
   ctx.fillText('LOOK RIGHT →', 31 * TILE, 19.85 * TILE);
   ctx.fillText('← LOOK LEFT', 11 * TILE, 22.45 * TILE);
+  ctx.fillText('LOOK RIGHT →', 30 * TILE, 9.85 * TILE);
   // bus lane on the south lane
   ctx.fillStyle = 'rgba(160,50,50,0.7)';
   ctx.fillRect(36 * TILE, 21 * TILE + 2, 20 * TILE, TILE - 6);
@@ -637,7 +653,7 @@ function drawFurniture(ctx: CanvasRenderingContext2D) {
   ctx.textAlign = 'center';
   ctx.fillText('436', sx + 2 * TILE + 5.5, sy - 9.5);
   // Belisha beacons at the zebra
-  for (const [bx, by] of [[29.8, 19.6], [32.2, 22.4], [9.8, 19.6], [12.2, 22.4]]) {
+  for (const [bx, by] of [[29.8, 19.6], [32.2, 22.4], [9.8, 19.6], [12.2, 22.4], [28.8, 9.6], [31.2, 12.4]]) {
     ctx.fillStyle = '#222';
     ctx.fillRect(bx * TILE - 1, by * TILE - 18, 2, 18);
     ctx.fillStyle = '#f39c12';

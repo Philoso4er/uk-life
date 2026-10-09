@@ -173,6 +173,9 @@ export const bandstand = { x: 52, y: 35, w: 4, h: 4 };
   fill(22, 3, 22, H - 1, T.Pave);
   fill(25, 3, 25, H - 1, T.Pave);
   fill(23, 3, 24, H - 1, T.Road);
+  // the main roads run straight through the junctions
+  fill(22, 10, 25, 11, T.Road);
+  fill(22, 20, 25, 21, T.Road);
   fill(21, 13, 21, 17, T.Pave);
   fill(26, 13, 26, 17, T.Pave);
   fill(21, 24, 21, 28, T.Pave);

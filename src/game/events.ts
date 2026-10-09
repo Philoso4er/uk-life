@@ -3,7 +3,8 @@
 import type { JobId, SaveState } from './types';
 import { HOMES, JOBS, LEVEL_XP, chance, completeGoal, dailyHooks, gainMoodlet, gainSkill, jobTitle, levelPay, money, tickHooks, weeklyHooks, type GameEvent, type Tone } from './economy';
 import { addMoodlet, applyFx, effectiveMood, removeMoodlet } from './needs';
-import { addDays, isWinter, london, now, type LondonTime } from './time';
+import { worldFeed } from './shared';
+import { DOW_LONG, addDays, isWinter, london, now, type LondonTime } from './time';
 
 export interface ShiftMods {
   bonus: number;
@@ -35,6 +36,16 @@ export interface EventDef {
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+/** "3am", "half 11", "quarter past midnight": how people actually say the time. */
+export function clockWords(t: { hh: number; mm: number }) {
+  const h12 = (h: number) => (h % 12 === 0 ? (h === 0 || h === 24 ? 'midnight' : 'midday') : String(h % 12));
+  const ampm = (h: number) => (h % 12 === 0 ? '' : h < 12 || h === 24 ? 'am' : 'pm');
+  if (t.mm < 8) return h12(t.hh) + ampm(t.hh);
+  if (t.mm < 23) return 'quarter past ' + h12(t.hh) + (h12(t.hh).length > 2 ? '' : ampm(t.hh));
+  if (t.mm < 38) return 'half ' + (t.hh % 12 || 12);
+  if (t.mm < 53) return 'quarter to ' + h12(t.hh + 1) + (h12(t.hh + 1).length > 2 ? '' : ampm(t.hh + 1));
+  return h12(t.hh + 1) + ampm(t.hh + 1);
+}
 const pay = (s: SaveState, n: number) => {
   s.money = r2(s.money - n);
 };
@@ -55,8 +66,10 @@ export const EVENTS: EventDef[] = [
     kicker: 'Travel news',
     title: 'Tube strike today',
     text: () => 'The Underground-ish is on strike. All lines. The Overground is “running a reduced service”, which means one train, somewhere, possibly. A rail replacement bus will run from outside each station.',
-    weight: 3,
-    cooldownDays: 6,
+    // strike days are shared: everyone in Peckwell gets the same one (see shared.ts)
+    weight: 25,
+    cooldownDays: 1,
+    when: (_s, t) => worldFeed().day(t.dateKey).strike,
     choices: [
       { label: 'Fair play to them', note: 'Solidarity. No Tube today.', apply: (s) => { s.flags.strike = today(); applyFx(s, { mood: 2 }); return 'You nod respectfully at a man with a placard. He nods back. A very British exchange.'; } },
       { label: 'Moan about it on Natter', note: 'No Tube today. Social +', apply: (s, out) => { s.flags.strike = today(); applyFx(s, { social: 8 }); out.push({ type: 'gossip', key: 'strike' }); return 'You posted “absolute joke” with a train emoji. Eleven people agreed. Nothing changed. Bliss.'; } },
@@ -138,9 +151,9 @@ export const EVENTS: EventDef[] = [
     kicker: 'Met Office-ish: amber warning',
     title: 'Heatwave! (24°C)',
     text: () => 'It is 24 degrees. The nation is in crisis. The Tube is a sauna, the shops have sold out of fans, and a man on the news is frying an egg on a bin.',
-    weight: 2,
-    cooldownDays: 5,
-    when: (_s, t) => t.month >= 5 && t.month <= 9,
+    weight: 20,
+    cooldownDays: 1,
+    when: (_s, t) => worldFeed().day(t.dateKey).heatwave,
     choices: [
       { label: 'Beer garden (£7.20)', note: 'Mood +, 🫧 -', req: afford(7.2), apply: (s, out) => { s.flags.heatwave = today(); pay(s, 7.2); applyFx(s, { mood: 12, social: 12, hygiene: -10 }); gainMoodlet(s, 'heatwave', out); return 'You sat in the Brolly’s beer garden (four benches and a bin) until you turned the colour of a postbox.'; } },
       { label: 'Hide in the Kwik Mart freezer aisle', note: 'Free. Cool. Weird.', apply: (s, out) => { s.flags.heatwave = today(); applyFx(s, { warmth: -5, mood: 3 }); gainMoodlet(s, 'heatwave', out); return 'You “browsed the frozen peas” for 40 minutes. The shopkeeper understood. He was in there too.'; } },
@@ -168,6 +181,7 @@ export const EVENTS: EventDef[] = [
     text: () => 'Not a text. A CALL. Either someone’s died or she wants to tell you about a programme she watched about Cornwall.',
     weight: 3,
     cooldownDays: 2,
+    when: (_s, t) => t.hh >= 9 && t.hh < 22,
     choices: [
       { label: 'Pick up', note: 'Social ++. About 40 minutes.', apply: (s, out) => { applyFx(s, { social: 25, energy: -4 }); if (chance(0.5)) { gainMoodlet(s, 'mums_dinner', out); applyFx(s, { hunger: 30 }); return 'It was the Cornwall programme. Then she sent a Tupperware of shepherd’s pie round with your cousin. You are loved.'; } return 'Nobody died. Your cousin got engaged. The neighbour’s cat got a new hip. You said “aw” fourteen times.'; } },
       { label: 'Text “can’t talk, all OK x”', note: 'Free. Guilt.', apply: (s, out) => { applyFx(s, { mood: -4 }); out.push({ type: 'phone', from: 'Mum', text: 'OK love. Just wanted to hear your voice. Mum x', tone: 'info', quiet: true }); return { text: 'She replied “OK love. Just wanted to hear your voice. Mum x”. Devastating.', tone: 'bad' }; } },
@@ -176,13 +190,14 @@ export const EVENTS: EventDef[] = [
   {
     id: 'fox',
     emoji: '🦊',
-    kicker: '3am',
+    kicker: 'In the dead of night',
     title: 'A fox is in the bins',
     text: () => 'There is a noise outside like someone being murdered. It is a fox. It has a chicken bone. It is looking at you like YOU’RE the problem.',
     weight: 2,
     cooldownDays: 4,
+    when: (_s, t) => t.hh >= 22 || t.hh < 5,
     choices: [
-      { label: 'Film it for Natter', note: 'Content!', apply: (s, out) => { out.push({ type: 'post', text: 'Fox in the bins at 3am. He looked me dead in the eye and took a chicken bone. Respect 🦊' }); applyFx(s, { social: 6 }); return 'You posted it. The locals went wild. The fox did not care.'; } },
+      { label: 'Film it for Natter', note: 'Content!', apply: (s, out) => { out.push({ type: 'post', text: `Fox in the bins at ${clockWords(london())}. He looked me dead in the eye and took a chicken bone. Respect 🦊` }); applyFx(s, { social: 6 }); return 'You posted it. The locals went wild. The fox did not care.'; } },
       { label: 'Shout “OI!” from the window', note: 'Classic.', apply: (s) => { applyFx(s, { energy: -4, mood: 2 }); return 'The fox stared at you, finished the bone, and left at a leisurely pace. He won. He always wins.'; } },
     ],
   },
@@ -194,7 +209,7 @@ export const EVENTS: EventDef[] = [
     text: () => 'You looked away for one second. A pigeon with one foot has your sausage roll. It’s making eye contact while it eats it.',
     weight: 2,
     cooldownDays: 3,
-    when: (s) => s.stats.sausageRolls > 0,
+    when: (s, t) => s.stats.sausageRolls > 0 && t.hh >= 7 && t.hh < 20,
     choices: [
       { label: 'Let it go', note: 'Make a friend.', apply: (s, out) => { gainMoodlet(s, 'pigeon_pal', out); applyFx(s, { hunger: -10 }); return 'You let it have it. The pigeon now follows you everywhere. You’ve named him Colin.'; } },
       { label: 'Chase it', note: '⚡ -6. You won’t win.', apply: (s) => { applyFx(s, { energy: -6, hunger: -10, mood: -3 }); return { text: 'You chased a pigeon down the high street. It flew off. Three people filmed you.', tone: 'bad' }; } },
@@ -203,12 +218,18 @@ export const EVENTS: EventDef[] = [
   {
     id: 'party',
     emoji: '🔊',
-    kicker: 'Midnight',
+    kicker: 'Late night',
     title: 'Upstairs are having a party',
-    text: () => 'The bass is coming through the ceiling. It’s a Tuesday. Someone is singing Mr Brightside. Everyone is singing Mr Brightside.',
+    text: () => {
+      const t = london();
+      // after midnight it's still "last night" as far as anyone's concerned
+      const day = DOW_LONG[t.hh < 5 ? (t.dayIdx + 6) % 7 : t.dayIdx];
+      const vibe = day === 'Friday' || day === 'Saturday' ? 'Fair enough, it’s a ' + day : 'It’s a ' + day;
+      return `The bass is coming through the ceiling. ${vibe}. Someone is singing Mr Brightside. Everyone is singing Mr Brightside.`;
+    },
     weight: 2,
     cooldownDays: 5,
-    when: (s) => renting(s),
+    when: (s, t) => renting(s) && (t.hh >= 21 || t.hh < 2),
     choices: [
       { label: 'Go up and join in', note: 'Social ++, ⚡ --', apply: (s, out) => { applyFx(s, { social: 30, energy: -20, mood: 8 }); gainMoodlet(s, 'tipsy', out); return 'You went up to complain and left at 4am with three new best friends and someone’s jacket.'; } },
       { label: 'Bang on the ceiling with a broom', note: 'British protest.', apply: (s) => { applyFx(s, { energy: -8, mood: -3 }); return 'They turned it down by 2%. You both pretended this was a victory.'; } },
@@ -218,11 +239,12 @@ export const EVENTS: EventDef[] = [
   {
     id: 'bins',
     emoji: '🗑️',
-    kicker: 'Thursday',
+    kicker: 'Thursday morning',
     title: 'It’s bin day. Which bin?',
     text: () => 'Blue, black, brown or green? The council calendar is a colour-coded nightmare. Auntie Bev is watching from her window.',
     weight: 2,
     cooldownDays: 6,
+    when: (_s, t) => t.dayIdx === 3 && t.hh >= 6 && t.hh < 12,
     choices: ['Blue (recycling)', 'Black (general)', 'Brown (food waste)'].map((label, i) => ({
       label,
       apply: (s: SaveState, out: GameEvent[]) => {
@@ -408,17 +430,22 @@ dailyHooks.push((s) => {
 // ------------------------------------------------------------------ prepayment meter + damp
 export const EMERGENCY_CREDIT = 5;
 export const meterDaily = (t: LondonTime) => 1.8 + (isWinter(t) ? 0.9 : 0);
-dailyHooks.push((s, out, key) => {
+dailyHooks.push((s, out, key, missed) => {
   if (!renting(s)) return;
-  const t = london();
+  const t = london(new Date(key + 'T12:00:00Z').getTime());
   const before = s.meter;
-  s.meter = r2(Math.max(-EMERGENCY_CREDIT, s.meter - meterDaily(t)));
-  if (before > 3 && s.meter <= 3 && s.meter > 0) out.push({ type: 'card', id: 'meterlow' });
-  else if (before > 0 && s.meter <= 0) out.push({ type: 'phone', from: 'Power company-ish', text: `Your meter’s run dry, so you’re on emergency credit (£${EMERGENCY_CREDIT}). Top up at any PayPoint-ish (Kwik Mart). The emergency credit gets paid back first.`, tone: 'bad' });
-  else if (before > -EMERGENCY_CREDIT && s.meter <= -EMERGENCY_CREDIT) out.push({ type: 'phone', from: 'Power company-ish', text: 'Emergency credit used up. Your electric is OFF: no heating, no kettle, cold showers. Top up the key at Kwik Mart.', tone: 'bad' });
+  // days you weren't around still use power (the fridge doesn't stop), but they never eat into emergency credit
+  const floor = missed ? Math.min(before, 0) : -EMERGENCY_CREDIT;
+  s.meter = r2(Math.max(floor, s.meter - meterDaily(t)));
+  if (missed) {
+    if (before > 0 && s.meter <= 0) out.push({ type: 'phone', from: 'Power company-ish', text: 'Your meter ran dry while you were away. Top up at any PayPoint-ish (Kwik Mart) or you’ll be on emergency credit.', tone: 'bad', quiet: true });
+  } else if (before > 3 && s.meter <= 3 && s.meter > 0) out.push({ type: 'card', id: 'meterlow' });
+  else if ((before > 0 || (before === 0 && s.meter < 0)) && s.meter <= 0) out.push({ type: 'phone', from: 'Power company-ish', text: `Your meter’s run dry, so you’re on emergency credit (£${EMERGENCY_CREDIT}). Top up at any PayPoint-ish (Kwik Mart). The emergency credit gets paid back first.`, tone: 'bad' });
+  else if (!missed && before > -EMERGENCY_CREDIT && s.meter <= -EMERGENCY_CREDIT) out.push({ type: 'phone', from: 'Power company-ish', text: 'Emergency credit used up. Your electric is OFF: no heating, no kettle, cold showers. Top up the key at Kwik Mart.', tone: 'bad' });
   // damp creeps in, faster in winter and if you never put the heating on
   const heated = s.flags.heatedDay === addDays(key, -1) || s.flags.heatedDay === key;
-  s.damp = Math.min(100, s.damp + HOMES[s.home].dampRate * (isWinter(t) ? 1.5 : 1) * (heated ? 0.5 : 1.2));
+  // an empty flat gets damp too, but slower than one you're breathing and showering in
+  s.damp = Math.min(100, s.damp + HOMES[s.home].dampRate * (isWinter(t) ? 1.5 : 1) * (heated ? 0.5 : 1.2) * (missed ? 0.6 : 1));
   if (s.damp >= 60 && !s.flags.dampWarned) {
     s.flags.dampWarned = true;
     out.push({ type: 'phone', from: 'Auntie Bev', text: 'Love, is that black mould on your window? Bleach, open the window every morning, and nag your landlord. In that order. x', tone: 'info', quiet: true });
@@ -469,15 +496,16 @@ weeklyHooks.push((s, out) => {
   if (met) s.flags.ucWarned = false;
   s.uc.sanctioned = false;
 });
-dailyHooks.push((s, out, key) => {
-  if (!s.uc.claiming || !s.uc.appt) return;
+dailyHooks.push((s, out, key, missed) => {
+  // missed days are judged once, on the day you're back (one sanction, not one per day)
+  if (missed || !s.uc.claiming || !s.uc.appt) return;
   if (s.uc.appt < key && !s.uc.attended) {
     s.uc.sanctioned = true;
     addMoodlet(s, 'sanctioned');
     s.uc.appt = nextWeekday(key, 1);
-    out.push({ type: 'phone', from: 'Universal Credit-ish journal', text: `You missed your work coach appointment. A sanction will be applied to your next payment. Your new appointment is ${s.uc.appt} at Jobcentre Minus.`, tone: 'bad' });
+    out.push({ type: 'phone', from: 'Universal Credit-ish journal', text: `You missed your work coach appointment. A sanction will be applied to your next payment. Your new appointment is ${s.uc.appt} at Jobcentre Minus, between 9am and 5pm.`, tone: 'bad' });
   } else if (s.uc.appt === key && !s.uc.attended) {
-    out.push({ type: 'phone', from: 'Universal Credit-ish journal', text: 'Reminder: you have a work coach appointment at Jobcentre Minus TODAY. Any time before they close (they close when Sandra says so).', tone: 'info', quiet: true });
+    out.push({ type: 'phone', from: 'Universal Credit-ish journal', text: 'Reminder: you have a work coach appointment at Jobcentre Minus TODAY. Any time between 9am and 5pm (or whenever Sandra goes for lunch).', tone: 'info', quiet: true });
   }
 });
 export const ucFns = {

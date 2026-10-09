@@ -14,6 +14,9 @@ import { EVENT_BY_ID, SHIFT_CARDS, eventDebug, choiceBlocked, resolveChoice, shi
 import { Hud } from './Hud';
 import { Creator } from './Creator';
 import { PlaceDialog, ctxNow } from './Place';
+import { PLACE_HOURS, placeOpen } from '../game/actions';
+import { sfx } from '../game/audio';
+import { GUIDE_STEPS, guideFinished, guideStep, skipGuide } from '../game/guide';
 import { Phone, type PhoneApp } from './Phone';
 
 type Dialog = { kind: 'building'; b: Building } | { kind: 'billboard'; bb: Billboard } | { kind: 'barber' } | { kind: 'shift'; job: JobId };
@@ -63,7 +66,10 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     setToasts((t) => [...t.slice(-2), { id, text, tone, onTap }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), onTap ? 5200 : 3800);
   }, []);
-  const card = useCallback((c: Omit<Card, 'id'>) => setCards((q) => [...q, { ...c, id: toastId++ }]), []);
+  const card = useCallback((c: Omit<Card, 'id'>) => {
+    sfx.pop();
+    setCards((q) => [...q, { ...c, id: toastId++ }]);
+  }, []);
   /** show straight after the card currently on screen (for "what happened next") */
   const cardNext = useCallback((c: Omit<Card, 'id'>) => setCards((q) => [...q.slice(0, 1), { ...c, id: toastId++ }, ...q.slice(1)]), []);
   const shiftMods = useRef<ShiftMods>({ bonus: 0, mult: 1 });
@@ -162,7 +168,13 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
       onInteract: (b) => setDialog({ kind: 'building', b }),
       onBillboard: (bb) => setDialog({ kind: 'billboard', bb }),
       onEvents: (ev) => handleEventsRef.current(ev),
-      onDeliveryDone: (earned, onTime, total) => {
+      onDeliveryDone: (earned, onTime, total, done, cancelled) => {
+        if (cancelled && done === 0) {
+          // nothing delivered, nothing earned: no shift on record, no "+£0" fanfare
+          shiftMods.current = { bonus: 0, mult: 1 };
+          toast('Shift cancelled. No drops, no pay. The chicken goes to someone else.', 'info');
+          return;
+        }
         const out: GameEvent[] = [];
         const tip = Math.round(shiftMods.current.bonus * 100) / 100;
         earned = Math.round((earned * shiftMods.current.mult + tip) * 100) / 100;
@@ -171,9 +183,14 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
         shiftXp(e.save, total ? onTime / total : 0, out);
         e.touch();
         handleEventsRef.current(out);
+        if (cancelled) {
+          card({ emoji: '🛵', kicker: 'Shift ended early', title: `+${money(earned)}`, body: <p>{done}/{total} drops made before you called it a day. You get paid for those.</p>, choices: [{ label: 'Fair enough', onPick: () => {} }] });
+          return;
+        }
         card({ emoji: '🛵', kicker: 'Delivery shift done', title: `+${money(earned)}`, body: <p>{onTime}/{total} drops on time. {onTime === total ? 'Five stars. The chips were still warm.' : onTime ? 'Mixed reviews. One customer says you “looked stressed”.' : 'One star: “chips were cold, rider was sweaty”.'}</p>, choices: [{ label: 'Lovely', onPick: () => {} }] });
       },
       onIncoming: (kind, from, text) => {
+        if (kind === 'dm') sfx.buzz();
         if (phoneRef.current) return;
         if (kind === 'dm') toast(`✉️ ${from}: ${text.length > 70 ? text.slice(0, 68) + '…' : text}`, 'info', () => setPhone('messages'));
       },
@@ -278,6 +295,20 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     showEventRef.current(pool[Math.floor(Math.random() * pool.length)].id);
   }, [dropIdx]);
 
+  // first-session guide
+  const guideIdx = engine && snap ? guideStep(engine.save) : -1;
+  const guidePlace = guideIdx >= 0 && engine ? GUIDE_STEPS[guideIdx].place(engine.save) : null;
+  useEffect(() => {
+    engine?.setGuideTarget(guidePlace);
+  }, [engine, guidePlace]);
+  useEffect(() => {
+    if (!engine || !snap) return;
+    if (guideFinished(engine.save)) {
+      engine.touch();
+      card({ emoji: '🎉', kicker: 'Guide complete', title: 'You’re a local now', body: <p>Fed, employed and one shift down. The rest of Peckwell is yours: check 📱 → Goals for what’s next, and mind the swan.</p>, choices: [{ label: 'Cheers', onPick: () => {} }] });
+    }
+  }, [engine, snap, card]);
+
   if (!snap || !engine || !social)
     return (
       <div className="game">
@@ -346,6 +377,7 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     completeGoal(s, 'tube', out);
     passTime(s, 12, { raining: false, outdoors: false });
     const st = stations.find((x) => x.id === id)!;
+    sfx.chime();
     journey('🚇', pickOne(ANNOUNCEMENTS), buildingById(st.id), () => {
       handleEvents(out);
       toast(`Arrived at ${st.name}.`, 'info');
@@ -401,7 +433,17 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     const ctxFn = () => ctxNow(snap.raining, engine.peopleNear(b.id));
     const job = EMPLOYER[b.id];
     const common = { b, save: s, ctxFn, onEvents: (ev: GameEvent[]) => run(() => handleEvents(ev)), onClose: close };
-    if (b.kind === 'jobcentre') content = <PlaceDialog {...common} tabs={[{ id: 'jobs', label: 'Jobs', node: <JobsList save={s} onTake={takeJob} /> }]} defaultTab={s.job ? 'do' : 'jobs'} greeting={`You take a ticket: #${380 + (london().mm % 60)}. Now serving: #9.`} />;
+    if (b.kind === 'jobcentre') {
+      const open = placeOpen(b.id, london());
+      content = (
+        <PlaceDialog
+          {...common}
+          tabs={[{ id: 'jobs', label: open ? 'Jobs' : 'Jobs (kiosk)', node: <JobsList save={s} onTake={takeJob} /> }]}
+          defaultTab={s.job ? 'do' : 'jobs'}
+          greeting={open ? `You take a ticket: #${380 + (london().mm % 60)}. Now serving: #9.` : `The shutters are down (open ${PLACE_HOURS.jobcentre.label}). The job kiosk outside still works. Mostly.`}
+        />
+      );
+    }
     else if (b.kind === 'lettings') content = <PlaceDialog {...common} tabs={[{ id: 'homes', label: 'Homes', node: <HomesList save={s} onRent={rent} onSofa={backToSofa} /> }]} defaultTab="homes" greeting="Josh looks up from his phone. “Hiya! Everything’s going fast, so… yeah.”" />;
     else if (b.kind === 'tube') {
       const strike = s.flags.strike === london().dateKey;
@@ -503,7 +545,30 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
   return (
     <div className="game">
       <canvas ref={canvasRef} className="game-canvas" />
-      <Hud snap={snap} save={s} onCancelDelivery={() => engine.cancelDelivery()} onOpenMe={() => setPhone('me')} />
+      <Hud snap={snap} save={s} onCancelDelivery={() => engine.cancelDelivery()} onOpenMe={() => setPhone('me')}>
+        {guideIdx >= 0 && !snap.delivery ? (
+          <div className="guide panel" role="status">
+            <div className="guide-step">
+              {guideIdx + 1}/{GUIDE_STEPS.length}
+            </div>
+            <div className="guide-main">
+              <b>{GUIDE_STEPS[guideIdx].title}</b>
+              <span>{GUIDE_STEPS[guideIdx].text(s)}</span>
+            </div>
+            <button
+              className="btn btn-ghost btn-small guide-skip"
+              onClick={() => {
+                skipGuide(s);
+                engine.setGuideTarget(null);
+                engine.touch();
+                toast('Guide off. You can find your goals in 📱 → Goals.', 'info');
+              }}
+            >
+              Skip
+            </button>
+          </div>
+        ) : null}
+      </Hud>
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={'toast ' + t.tone + (t.onTap ? ' tappable' : '')} onClick={() => t.onTap && (t.onTap(), setToasts((q) => q.filter((x) => x.id !== t.id)))}>

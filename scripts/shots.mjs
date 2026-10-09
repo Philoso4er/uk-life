@@ -71,6 +71,10 @@ async function tour(label, viewport, mobile) {
   await dismissCards();
   await dbg(() => { window.__ukl.events.off = true; }); // we trigger cards ourselves below
   await setLondon(1, 12, 30); // Tuesday lunchtime
+  // the first-session guide: banner under the HUD, arrow over Crumbs
+  await dbg(() => { const e = window.__ukl.engine; e.teleport(16.5, 19.2); e.touch(); });
+  await w(900);
+  await shot('03b-guide');
 
   // ---- a timed action at Crumbs
   await enter(9.5, 18.6, /Enter Crumbs/);
@@ -114,6 +118,9 @@ async function tour(label, viewport, mobile) {
   await page.keyboard.press('Escape');
 
   // ---- Jobcentre → barista shift
+  await dbg(() => { const e = window.__ukl.engine; e.teleport(30.5, 19.2); e.touch(); });
+  await w(700);
+  await shot('10b-guide-step-2');
   await enter(36.5, 18.6, /Enter Jobcentre Minus/);
   await shot('11-jobcentre');
   await btn('Take job').click();
@@ -228,6 +235,11 @@ async function tour(label, viewport, mobile) {
   await shot('25-tube-strike');
   await page.keyboard.press('Escape');
   await w(200);
+  await enter(36.5, 18.6, /Enter Jobcentre Minus/);
+  await shot('27a-jobcentre-closed');
+  await page.keyboard.press('Escape');
+  await w(200);
+  await setLondon(3, 11, 0);
   await dbg(() => { const u = window.__ukl; u.engine.save.job = 'barista'; u.engine.save.jobXp = 25; u.handle([{ type: 'card', id: 'review' }]); });
   await w(400);
   await shot('26-event-card-promotion');
@@ -259,6 +271,11 @@ async function tour(label, viewport, mobile) {
   await btn(/My Stuff/).click();
   await w(300);
   await shot('30-phone-my-stuff');
+  await btn('Back').click();
+  await w(200);
+  await btn(/^Settings/).click();
+  await w(300);
+  await shot('32-phone-settings-sound');
   await btn('Close phone').click();
   await w(200);
   await dbg(() => { const u = window.__ukl; u.engine.save.owned.hustle.listings = [{ item: 'a Nintendo-ish Game Boy that turns on', price: 22, sellAt: 0, haggled: true }]; u.engine.save.flags.lowballOpen = true; u.engine.save.flags.lowball = 0; u.showEvent('lowball'); });
