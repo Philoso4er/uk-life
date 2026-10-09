@@ -60,7 +60,7 @@ export interface SaveState {
   lastBillKey: string; // Monday date key last billed
   umbrellaUntil: number; // life-minute the brolly is inevitably lost
   // things
-  inv: { teabags: number; coat: boolean };
+  inv: { teabags: number; coat: boolean; veg: number };
   cooldowns: Record<string, number>; // action id -> real ms when available again
   goals: Partial<Record<GoalId, boolean>>;
   pos: { x: number; y: number };
@@ -77,5 +77,5 @@ export interface SaveState {
   nextEventAt: number; // real ms
   uc: { claiming: boolean; appt: string; attended: boolean; searches: number; weekEarned: number; sanctioned: boolean };
   // phase 3: things to own
-  owned: { items: string[]; btl: number; allotment: null | { planted: number; crop: string }; hustle: null | { kind: string; stock: number; lastPayKey: string } };
+  owned: { items: string[]; btl: number; allotment: null | { planted: number; crop: string }; hustle: null | { stock: string[]; listings: { item: string; price: number; sellAt: number; haggled?: boolean }[] } };
 }

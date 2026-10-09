@@ -240,6 +240,32 @@ async function tour(label, viewport, mobile) {
   await page.keyboard.press('Escape');
   await w(200);
 
+  // ---- Phase 3: things to own. Allotment, Flogit, a buy-to-let, the Amazin' app
+  await dbg(() => { const e = window.__ukl.engine; const s = e.save; const T = Date.now() + window.__ukl.getClockOffset(); s.money = 7400; s.flags.nanHelps = 2; s.owned.allotment = { planted: T - 200 * 60000, crop: 'spuds' }; s.owned.hustle = { stock: ['a bread maker (it’s always a bread maker)'], listings: [{ item: 'a fondue set, never used', price: 14, sellAt: T + 9e5 }] }; s.inv.veg = 3; e.touch(); });
+  await enter(6.5, 37.9, /Visit Peckwell Allotments/);
+  await shot('28-allotment-menu');
+  await page.keyboard.press('Escape');
+  await w(200);
+  await page.getByRole('button', { name: 'Phone', exact: true }).click();
+  await w(300);
+  await btn(/Amazin/).click();
+  await w(300);
+  await shot('29-phone-shop');
+  await page.getByRole('button', { name: '£60', exact: true }).first().click();
+  await w(400);
+  await btn('Back').click();
+  await w(200);
+  await dbg(() => { const s = window.__ukl.engine.save; s.owned.btl = 1; });
+  await btn(/My Stuff/).click();
+  await w(300);
+  await shot('30-phone-my-stuff');
+  await btn('Close phone').click();
+  await w(200);
+  await dbg(() => { const u = window.__ukl; u.engine.save.owned.hustle.listings = [{ item: 'a Nintendo-ish Game Boy that turns on', price: 22, sellAt: 0, haggled: true }]; u.engine.save.flags.lowballOpen = true; u.engine.save.flags.lowball = 0; u.showEvent('lowball'); });
+  await w(400);
+  await shot('31-event-card-flogit-lowball');
+  await dismissCards();
+
   // ---- leave for 9 hours, come back
   const [off, json] = await dbg(() => { const u = window.__ukl; u.writeSave(u.engine.save); const s = { ...u.engine.save, lastSeen: u.engine.save.lastSeen - 9 * 3600e3 }; return [u.getClockOffset(), JSON.stringify(s)]; });
   await page.goto(BASE + '/?debug=1&clock=' + off);

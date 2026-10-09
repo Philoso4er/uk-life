@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { BTL_DEPOSIT, BTL_RENT, CROP_BY_ID, PLOT_RENT, STATUS_ITEMS, buyStatus, cropLeft } from '../game/owning';
 import { EMERGENCY_CREDIT, UC_SEARCHES, UC_WORK_ALLOWANCE, meterDaily, ucAward } from '../game/events';
 import type { Engine, Snapshot } from '../game/engine';
 import { GOALS, HOMES, JOBS, LEVEL_PAY, completeGoal, jobTitle, levelPay, money, nextLevelXp, shiftAvailability, type GameEvent } from '../game/economy';
@@ -10,7 +11,7 @@ import type { SaveState } from '../game/types';
 import { MAX_DM, MAX_POST } from '../net/filter';
 import { avatarUrl } from './avatarUrl';
 
-export type PhoneApp = 'home' | 'natter' | 'messages' | 'new' | 'work' | 'bank' | 'goals' | 'me' | 'settings' | `thread:${string}`;
+export type PhoneApp = 'home' | 'natter' | 'messages' | 'new' | 'work' | 'bank' | 'goals' | 'me' | 'settings' | 'shop' | 'stuff' | `thread:${string}`;
 
 const ago = (ts: number) => {
   const s = Math.max(0, (Date.now() - ts) / 1000);
@@ -56,7 +57,7 @@ export function Phone({
   const social = useSyncExternalStore(engine.social.subscribe, engine.social.getSnapshot);
   const t = london(snap.now);
   const back = () => setApp(app.startsWith('thread:') ? 'messages' : app === 'new' ? 'messages' : 'home');
-  const title: Record<string, string> = { natter: 'Natter', messages: 'Messages', new: 'New message', work: 'Work', bank: 'Bank', goals: 'Goals', me: 'Me', settings: 'Settings' };
+  const title: Record<string, string> = { natter: 'Natter', messages: 'Messages', new: 'New message', work: 'Work', bank: 'Bank', goals: 'Goals', me: 'Me', settings: 'Settings', shop: 'Amazin’', stuff: 'My Stuff' };
   const peer = app.startsWith('thread:') ? social.authors[app.slice(7)] ?? engine.social.author(app.slice(7)) : null;
 
   return (
@@ -101,6 +102,10 @@ export function Phone({
             <Goals snap={snap} />
           ) : app === 'me' ? (
             <Me save={engine.save} snap={snap} />
+          ) : app === 'shop' ? (
+            <Shop engine={engine} onEvents={onEvents} toast={toast} />
+          ) : app === 'stuff' ? (
+            <Stuff save={engine.save} />
           ) : app === 'settings' ? (
             <Settings engine={engine} social={social} onQuit={onQuit} onReset={onReset} />
           ) : null}
@@ -121,6 +126,8 @@ function Home({ snap, social, setApp, onClose }: { snap: Snapshot; social: Socia
     { id: 'bank', icon: '🏦', label: 'Bank', bg: 'linear-gradient(135deg,#2c3e50,#4ca1af)' },
     { id: 'goals', icon: '🎯', label: 'Goals', badge: goalsLeft ? undefined : 0, bg: 'linear-gradient(135deg,#ffd23f,#ff9f1c)' },
     { id: 'me', icon: '🙂', label: 'Me', bg: 'linear-gradient(135deg,#a18cd1,#7b5cc4)' },
+    { id: 'shop', icon: '📦', label: 'Amazin’', bg: 'linear-gradient(135deg,#232f3e,#ff9900)' },
+    { id: 'stuff', icon: '🏡', label: 'My Stuff', bg: 'linear-gradient(135deg,#56ab2f,#a8e063)' },
     { id: 'settings', icon: '⚙️', label: 'Settings', bg: 'linear-gradient(135deg,#636e72,#2d3436)' },
   ];
   return (
@@ -732,6 +739,82 @@ function Settings({ engine, social, onQuit, onReset }: { engine: Engine; social:
         >
           Reset save
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ Phase 3: shopping + owning
+function Shop({ engine, onEvents, toast }: { engine: Engine; onEvents: (ev: GameEvent[]) => void; toast: (t: string, tone?: 'good' | 'bad' | 'info') => void }) {
+  const save = engine.save;
+  const [, force] = useState(0);
+  return (
+    <div className="app-pad">
+      <p className="muted small">Next-day delivery*. Free returns**. <i>*Some day. **Not free.</i> Balance: <b>{money(save.money)}</b></p>
+      <ul className="item-list shop-list">
+        {STATUS_ITEMS.map((it) => {
+          const got = save.owned.items.includes(it.id);
+          return (
+            <li key={it.id} className="item">
+              <div className="shop-emoji">{it.emoji}</div>
+              <div className="item-main">
+                <div className="item-name">{it.name}</div>
+                <div className="item-note">{it.blurb}</div>
+              </div>
+              <button
+                className={'btn ' + (got ? 'btn-ghost' : 'btn-primary')}
+                disabled={got || save.money < it.price}
+                onClick={() => {
+                  const out: GameEvent[] = [];
+                  const why = buyStatus(save, it.id, out);
+                  if (why) return toast(why, 'bad');
+                  onEvents(out);
+                  force((n) => n + 1);
+                }}
+              >
+                {got ? 'Owned' : money(it.price)}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="muted small">Pretend money only. Nothing here costs real money, ever.</p>
+    </div>
+  );
+}
+
+function Stuff({ save }: { save: SaveState }) {
+  const a = save.owned.allotment;
+  const h = save.owned.hustle;
+  const left = cropLeft(save);
+  const items = STATUS_ITEMS.filter((i) => save.owned.items.includes(i.id));
+  return (
+    <div className="app-pad">
+      <div className="stats">
+        <div className="uc-head">🌱 Allotment</div>
+        {a ? (
+          <>
+            <Row k="Plot" v={`Maureen’s old plot · £${PLOT_RENT}/wk`} />
+            <Row k="Growing" v={a.crop ? `${CROP_BY_ID[a.crop].emoji} ${CROP_BY_ID[a.crop].name} · ${left ? `ready in ${fmtDuration(left)}` : 'READY to harvest'}` : 'Nothing. Kenneth the gnome is lonely.'} />
+          </>
+        ) : (
+          <Row k="Plot" v="None yet. Help Nan at the allotments: she knows people." />
+        )}
+        <Row k="Veg in the cupboard" v={String(save.inv.veg)} />
+      </div>
+      <div className="stats">
+        <div className="uc-head">📸 Flogit</div>
+        <Row k="Stock in the hallway" v={h?.stock.length ? `${h.stock.length} (list it at home)` : 'None. Rummage at Second Chances.'} />
+        {h?.listings.map((l, i) => <Row key={i} k={money(l.price)} v={l.item} />)}
+        <Row k="Sold" v={String(save.flags.flips ?? 0)} />
+      </div>
+      <div className="stats">
+        <div className="uc-head">🏘️ Property</div>
+        <Row k="Buy-to-let flats" v={save.owned.btl ? `${save.owned.btl} · about ${money(BTL_RENT * save.owned.btl)}/wk in, before everything breaks` : `None. ${money(BTL_DEPOSIT)} deposit at Fleecems Lettings.`} />
+      </div>
+      <div className="stats">
+        <div className="uc-head">✨ Nice things</div>
+        {items.length ? items.map((i) => <Row key={i.id} k={i.emoji} v={i.name} />) : <Row k="—" v="Nothing yet. The Amazin’ app is right there." />}
       </div>
     </div>
   );

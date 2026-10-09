@@ -151,6 +151,12 @@ const CONTEXT: { when: (c: Ctx) => boolean; lines: string[] }[] = [
 
 /** Things NPCs say after seeing you do something. {me} = your name. */
 const GOSSIP: Record<string, string[]> = {
+  status: ['{me} has bought an air fryer or something and won’t shut up about it. Happy for them. Genuinely.', 'Saw a courier leave a parcel in {me}’s bin. Classic.', '{me} has “treated themselves”. We all know what that means. Klarna-ish.'],
+  plot: ['{me} has got an allotment plot?! I’ve been on that waiting list since 2011.', 'Nan’s pulled strings for {me} at the allotments. Doris is FUMING.'],
+  veg: ['{me} grew radishes and is acting like they invented farming.', 'Got given a home-grown spud by {me}. It was a spud. Nice spud though.'],
+  marrow: ['{me} BEAT NAN at the Peckwell Show. Marrow class. Absolute scenes.', 'Massive upset at the marrow show. Nan has demanded a recount.'],
+  landlord: ['{me} has bought a flat to rent out. Another one lost to the dark side.', 'Heard {me} is a landlord now. Nigel has a new friend.'],
+  flogit: ['{me} is flipping charity shop finds on Flogit now. The bread maker economy is booming.', 'Bought a fondue set off {me} on Flogit. It was “smoke-free”. It was not.'],
   sausage: ['Just watched {me} eat a sausage roll in four bites. Respect.', 'The Crumbs queue is moving today. {me} was in and out like a pro.'],
   ducks: ['Someone fed the ducks peas, not bread. Finally. A hero walks among us.', '{me} at the pond feeding the ducks. Gerald the duck looked so happy.'],
   swanned: ['Just watched a swan chase {me} round the pond twice. 10/10 would watch again.', 'The swan is back on its nonsense. Stay safe out there.'],

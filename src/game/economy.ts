@@ -157,7 +157,7 @@ export function newSave(name: string, avatar: Avatar): SaveState {
     arrears: 0,
     lastBillKey: rentKey(t),
     umbrellaUntil: 0,
-    inv: { teabags: 0, coat: false },
+    inv: { teabags: 0, coat: false, veg: 0 },
     cooldowns: {},
     goals: {},
     pos: { ...SPAWN },
@@ -234,6 +234,11 @@ export function migrate(raw: unknown): SaveState | null {
   for (const k of ['energy', 'hunger', 'social', 'hygiene', 'warmth', 'mood'] as const) s[k] = clamp(s[k]);
   s.moodlets = s.moodlets.filter((m) => m && typeof m.id === 'string' && Number.isFinite(m.until));
   if (s.lastSeen > now() + 60000) s.lastSeen = now();
+  // phase 3 shapes: an early hustle placeholder had a different shape
+  if (s.owned.hustle && (!Array.isArray(s.owned.hustle.stock) || !Array.isArray(s.owned.hustle.listings))) s.owned.hustle = null;
+  if (s.owned.allotment && (typeof s.owned.allotment.crop !== 'string' || !Number.isFinite(s.owned.allotment.planted))) s.owned.allotment = null;
+  s.owned.btl = Math.max(0, Math.min(3, Math.round(s.owned.btl)));
+  s.flags.lowballOpen = false; // a haggling card can't survive a reload
   return s;
 }
 

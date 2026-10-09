@@ -2455,3 +2455,8 @@ kbd {
 .warn-text { color: #ffb4a8; font-weight: 700; }
 .uc-card { margin-top: 12px; }
 .uc-head { font-weight: 800; font-size: 13px; padding: 4px 0 6px; }
+
+/* ---- phase 3 */
+.shop-list .item { align-items: center; gap: 10px; }
+.shop-emoji { font-size: 28px; width: 40px; text-align: center; flex: none; }
+.app-stuff .stats { margin-bottom: 12px; }
