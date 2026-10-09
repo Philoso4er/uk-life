@@ -2,6 +2,8 @@
 // pillock, muppet, arse) is allowed. Strong swearing and slurs are masked.
 
 export const MAX_CHAT = 120;
+export const MAX_POST = 140;
+export const MAX_DM = 200;
 export const MAX_NAME = 16;
 
 const CONTAINS = [

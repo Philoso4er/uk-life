@@ -1,4 +1,4 @@
-import { sanitizeChat, sanitizePlayer, type ChatMessage, type NetHandlers, type PlayerState, type Transport } from './types';
+import { sanitizePlayer, sanitizeSocial, type NetHandlers, type PlayerState, type SocialWire, type Transport } from './types';
 
 /**
  * Same-browser "multiplayer" over BroadcastChannel. Used when Supabase isn't configured,
@@ -45,9 +45,9 @@ export class LocalTransport implements Transport {
         this.h.onCount(this.seen.size + 1);
         this.post({ t: 'state', p: this.me }); // say hello back so they see us immediately
       }
-    } else if (d.t === 'chat') {
-      const m = sanitizeChat(d.m);
-      if (m && m.from !== this.me.id) this.h.onChat(m);
+    } else if (d.t === 'social') {
+      const m = sanitizeSocial(d.m);
+      if (m) this.h.onSocial(m);
     } else if (d.t === 'bye' && typeof d.id === 'string') {
       this.seen.delete(d.id);
       this.h.onLeave(d.id);
@@ -77,8 +77,8 @@ export class LocalTransport implements Transport {
     this.me = p;
     this.post({ t: 'state', p });
   }
-  sendChat(m: ChatMessage) {
-    this.post({ t: 'chat', m });
+  sendSocial(m: SocialWire) {
+    this.post({ t: 'social', m });
   }
   stop() {
     this.post({ t: 'bye', id: this.me?.id });

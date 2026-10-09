@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { SaveState } from '../game/types';
-import { money, clock } from '../game/economy';
+import { money, jobTitle } from '../game/economy';
 import { hasRealtime } from '../net';
 import { AvatarCanvas } from './AvatarCanvas';
 
@@ -51,7 +51,7 @@ export function Title({ save, onContinue, onNew }: { save: SaveState | null; onC
             <div>
               <strong>{save.name}</strong>
               <div className="muted">
-                {money(save.money)} · Week {clock(save.minutes).week} · {save.home === 'sofa' ? "on Dave's sofa" : 'renting'}
+                {money(save.money)} · {jobTitle(save)} · {save.home === 'sofa' ? "on Dave's sofa" : 'renting'}{save.streak.count > 1 ? ` · 🔥 ${save.streak.count}` : ''}
               </div>
             </div>
           </div>

@@ -1,18 +1,22 @@
 import { drawAvatar } from './avatar';
-import { makeBots, updateBot, BOT_LINES, type Bot } from './bots';
-import { GAME_MIN_PER_SEC, tick, clock, type GameEvent } from './economy';
+import { makeBots, updateBot, type Bot } from './bots';
+import { catchUp, tick, type GameEvent } from './economy';
+import { activeMoodlets, effectiveMood } from './needs';
+import { london, now as realNow } from './time';
+import { SocialStore } from './social';
+import { NpcBrain } from './npcs';
 import { findPath } from './pathfind';
 import { FONT, billboardAt, drawBillboard, drawPigeon, drawTrain, drawVehicle, makeGlow, prerenderWorld, type Vehicle } from './render';
 import type { Facing, JobId, SaveState, HomeId, GoalId } from './types';
-import { H, TILE, W, billboards, buildings, deliveryDoors, doorFront, inPark, isSolid, lamps, buildingById, type Billboard, type Building } from './world';
-import type { ChatMessage, NetMode, PlayerState, Transport } from '../net/types';
-import { cleanMessage } from '../net/filter';
+import { H, TILE, W, billboards, buildings, deliveryDoors, doorFront, inPark, isSolid, lamps, buildingById, places, spots, type Billboard, type Building } from './world';
+import type { NetMode, PlayerState, Transport } from '../net/types';
 
 export interface EngineCallbacks {
   onInteract(b: Building): void;
   onBillboard(bb: Billboard): void;
   onEvents(ev: GameEvent[]): void;
   onDeliveryDone(earned: number, onTime: number, total: number): void;
+  onIncoming?(kind: 'dm' | 'post', from: string, text: string): void;
 }
 
 export interface DeliveryView {
@@ -28,8 +32,16 @@ export interface Snapshot {
   oyster: number;
   energy: number;
   hunger: number;
+  social: number;
+  hygiene: number;
+  warmth: number;
+  /** effective mood (base + moodlets) */
   mood: number;
-  minutes: number;
+  moodlets: { id: string; name: string; emoji: string; mood: number; desc: string; left: number; dynamic: boolean }[];
+  /** real time (ms), for the clock */
+  now: number;
+  meter: number;
+  streak: number;
   job: JobId | null;
   home: HomeId;
   shifts: number;
@@ -43,9 +55,8 @@ export interface Snapshot {
   online: number;
   localPeers: number;
   npcs: number;
-  nearby: { id: string; name: string } | null;
+  nearby: { id: string; name: string; spot: boolean } | null;
   delivery: DeliveryView | null;
-  chat: ChatMessage[];
   fps: number;
 }
 
@@ -92,9 +103,10 @@ export class Engine {
   raining = false;
   private rainLevel = 0;
   private t = 0;
-  private minuteAcc = 0;
   private tickAcc = 0;
-  private lastHour = -1;
+  private lastTickReal = 0;
+  private weatherAt = 0;
+  private indoors = false;
   paused = false;
   private listeners = new Set<() => void>();
   private snap: Snapshot;
@@ -107,10 +119,9 @@ export class Engine {
   private netMode: NetMode = 'offline';
   private netStatus = 'offline';
   private online = 1;
-  private chat: ChatMessage[] = [];
   private lastSent = { x: 0, y: 0, facing: 'down' as Facing, moving: false, at: 0 };
-  private lastChatAt = 0;
-  private botChatAt = 12;
+  readonly social: SocialStore;
+  readonly brain: NpcBrain;
   private delivery: { stops: { name: string; x: number; y: number }[]; index: number; deadline: number; limit: number; earned: number; onTime: number } | null = null;
   private tap: { x: number; y: number; t: number } | null = null;
   private holding: { sx: number; sy: number } | null = null;
@@ -126,6 +137,12 @@ export class Engine {
     this.save = save;
     this.netId = `${save.id}.${Math.random().toString(36).slice(2, 6)}`;
     this.ctx = canvas.getContext('2d', { alpha: false })!;
+    this.social = new SocialStore('uklife.social.' + save.id, { id: save.id, name: save.name, avatar: save.avatar });
+    this.brain = new NpcBrain(this.social, save);
+    this.brain.onSpeak = (name, text) => {
+      const b = this.bots.find((x) => x.name === name);
+      if (b) b.bubble = { text: text.length > 90 ? text.slice(0, 88) + '…' : text, until: this.t + 6 };
+    };
     const p = this.validSpawn(save.pos.x, save.pos.y);
     this.player = { x: p.x, y: p.y, facing: 'down', moving: false, path: [], pending: null, stuck: 0 };
     this.cam = { x: p.x * TILE, y: p.y * TILE };
@@ -158,10 +175,19 @@ export class Engine {
     this.transport = transport;
     this.netMode = transport.mode;
     this.bots = makeBots(transport.mode === 'online' ? 4 : 8);
+    for (const b of this.bots) this.brain.setAvatar(b.name, b.avatar);
+    this.social.sender = (m) => this.transport?.sendSocial(m);
+    this.social.onIncoming = (kind, a, text) => this.cb.onIncoming?.(kind, a.name, text);
+    const out: GameEvent[] = [];
+    catchUp(this.save, out);
+    this.lastTickReal = realNow();
+    if (out.length) this.cb.onEvents(out);
+    this.brain.seed(this.npcCtx());
     this.netStatus = transport.mode === 'online' ? 'connecting' : transport.mode;
     try {
       await transport.start(this.playerState(), {
         onState: (p) => {
+          if (p.pid) this.social.upsertAuthor({ id: p.pid, name: p.name, handle: '@' + p.name.replace(/[^\w]/g, '').slice(0, 14), kind: 'player', avatar: p.avatar });
           const r = this.remotes.get(p.id);
           if (r) {
             r.p = p;
@@ -169,10 +195,11 @@ export class Engine {
           } else this.remotes.set(p.id, { p, rx: p.x, ry: p.y, last: performance.now() });
         },
         onLeave: (id) => this.remotes.delete(id),
-        onChat: (m) => {
-          this.pushChat(m);
-          const r = this.remotes.get(m.from);
-          if (r) r.bubble = { text: m.text, until: this.t + 6 };
+        onSocial: (m) => {
+          this.social.receive(m);
+          if (m.t === 'post' && !m.replyTo && !this.social.isMuted(m.from)) {
+            for (const r of this.remotes.values()) if (r.p.pid === m.from) r.bubble = { text: m.text, until: this.t + 6 };
+          }
         },
         onCount: (n) => {
           this.online = n;
@@ -187,7 +214,6 @@ export class Engine {
       console.warn('Realtime unavailable, carrying on in offline mode', e);
       this.netStatus = 'error';
     }
-    this.pushChat({ id: 'sys-hello', from: 'system', name: 'Peckwell', text: this.netMode === 'online' ? 'Connected to Peckwell. Be nice, it\u2019s a small neighbourhood.' : 'Offline mode: the locals are NPCs. (Open a second tab to see yourself in "local multiplayer".)', ts: Date.now(), kind: 'system' });
     this.dirty = true;
   }
 
@@ -204,6 +230,7 @@ export class Engine {
     window.removeEventListener('pointercancel', this.onPointerUp);
     this.canvas.removeEventListener('mousemove', this.onHover);
     this.transport?.stop();
+    this.social.persist();
   }
 
   // ------------------------------------------------------------ store
@@ -230,14 +257,20 @@ export class Engine {
       oyster: s.oyster,
       energy: s.energy,
       hunger: s.hunger,
-      mood: s.mood,
-      minutes: s.minutes,
+      social: s.social,
+      hygiene: s.hygiene,
+      warmth: s.warmth,
+      mood: effectiveMood(s, this.raining),
+      moodlets: activeMoodlets(s, this.raining).map((m) => ({ id: m.def.id, name: m.def.name, emoji: m.def.emoji, mood: m.def.mood, desc: m.def.desc, left: m.left, dynamic: m.dynamic })),
+      now: realNow(),
+      meter: s.meter,
+      streak: s.streak.count,
       job: s.job,
       home: s.home,
       shifts: s.shifts,
       rent: s.rent,
       arrears: s.arrears,
-      umbrella: s.umbrellaUntil > s.minutes,
+      umbrella: s.umbrellaUntil > s.life,
       goals: { ...s.goals },
       raining: this.raining,
       netMode: this.netMode,
@@ -245,9 +278,8 @@ export class Engine {
       online: this.online,
       localPeers: this.remotes.size,
       npcs: this.bots.length,
-      nearby: this.nearby ? { id: this.nearby.id, name: this.nearby.name } : null,
+      nearby: this.nearby ? { id: this.nearby.id, name: this.nearby.name, spot: this.nearby.kind === 'spot' } : null,
       delivery: d ? { target: d.stops[d.index].name, remaining: Math.max(0, d.deadline - this.t), index: d.index, total: d.stops.length, earned: d.earned } : null,
-      chat: this.chat,
       fps: Math.round(this.fps),
     };
   }
@@ -292,22 +324,30 @@ export class Engine {
     if (this.nearby && !this.paused) this.cb.onInteract(this.nearby);
   }
 
-  sendChat(raw: string): string | null {
-    const now = Date.now();
-    if (now - this.lastChatAt < 1500) return 'Easy, tiger. One message every couple of seconds.';
-    const text = cleanMessage(raw);
-    if (!text) return null;
-    this.lastChatAt = now;
-    const m: ChatMessage = { id: Math.random().toString(36).slice(2), from: this.netId, name: this.save.name, text, ts: now, kind: 'me' };
-    this.pushChat(m);
-    this.bubble = { text, until: this.t + 6 };
-    this.transport?.sendChat({ ...m, kind: 'player' });
-    return null;
+  /** Show a speech bubble over your own head (after posting on Natter). */
+  say(text: string) {
+    this.bubble = { text: text.length > 90 ? text.slice(0, 88) + '…' : text, until: this.t + 6 };
   }
-
-  pushChat(m: ChatMessage) {
-    this.chat = [...this.chat.slice(-79), m];
-    this.dirty = true;
+  /** True while you're inside a building's menu (keeps you dry). */
+  setIndoors(v: boolean) {
+    this.indoors = v;
+  }
+  /** NPC regulars (and real players) hanging around a place, e.g. for getting a round in. */
+  peopleNear(placeId: string, r = 9) {
+    const b = buildingById(placeId);
+    if (!b) return 0;
+    const f = doorFront(b);
+    let n = this.bots.filter((x) => Math.hypot(x.x - f.x, x.y - f.y) < r).length;
+    for (const x of this.remotes.values()) if (Math.hypot(x.rx - f.x, x.ry - f.y) < r) n++;
+    return n;
+  }
+  /** Real players currently in Peckwell (for starting DMs). */
+  onlinePlayers() {
+    return [...this.remotes.values()].filter((r) => r.p.pid).map((r) => ({ pid: r.p.pid!, name: r.p.name, avatar: r.p.avatar }));
+  }
+  npcCtx() {
+    const t = london();
+    return { raining: this.raining, hh: t.hh, dayIdx: t.dayIdx, flags: this.save.flags };
   }
 
   startDelivery() {
@@ -394,7 +434,7 @@ export class Engine {
     }
     const tx = Math.floor(w.x);
     const ty = Math.floor(w.y);
-    const b = buildings.find((b) => tx >= b.x && tx < b.x + b.w && ty >= b.y && ty < b.y + b.h);
+    const b = buildings.find((b) => tx >= b.x && tx < b.x + b.w && ty >= b.y && ty < b.y + b.h) ?? spots.find((sp) => Math.hypot(sp.x - w.x, sp.y - 0.6 - w.y) < 0.9);
     if (b) {
       const f = doorFront(b);
       this.walkTo(f.x, f.y, b.id);
@@ -420,7 +460,7 @@ export class Engine {
     this.hoverBillboard = bb?.id ?? null;
     const tx = Math.floor(w.x);
     const ty = Math.floor(w.y);
-    const onBuilding = buildings.some((b) => tx >= b.x && tx < b.x + b.w && ty >= b.y && ty < b.y + b.h);
+    const onBuilding = buildings.some((b) => tx >= b.x && tx < b.x + b.w && ty >= b.y && ty < b.y + b.h) || spots.some((sp) => Math.hypot(sp.x - w.x, sp.y - 0.6 - w.y) < 0.9);
     this.canvas.style.cursor = bb || onBuilding ? 'pointer' : 'default';
   };
 
@@ -476,7 +516,7 @@ export class Engine {
         if (d < 0.12) {
           p.path.shift();
           if (!p.path.length && p.pending) {
-            const b = buildings.find((b) => b.id === p.pending);
+            const b = places.find((b) => b.id === p.pending);
             p.pending = null;
             if (b) this.cb.onInteract(b);
           }
@@ -514,25 +554,25 @@ export class Engine {
       this.save.pos.y = p.y;
     } else p.moving = false;
 
-    // ---- clock + needs
-    if (!this.paused) {
-      this.minuteAcc += dt * GAME_MIN_PER_SEC;
-      this.tickAcc += dt;
-      if (this.tickAcc >= 0.25) {
-        this.tickAcc = 0;
-        const mins = this.minuteAcc;
-        this.minuteAcc = 0;
-        tick(this.save, mins, { raining: this.raining, inPark: inPark(p.x, p.y), onShift: !!this.delivery }, events);
-        this.dirty = true;
+    // ---- clock + needs (real UK time; your personal clock runs faster while you're out and about)
+    this.tickAcc += dt;
+    if (this.tickAcc >= 0.5) {
+      this.tickAcc = 0;
+      const tNow = realNow();
+      const dtMs = Math.max(0, Math.min(5000, tNow - this.lastTickReal));
+      this.lastTickReal = tNow;
+      tick(this.save, { raining: this.raining, outdoors: !this.indoors, inPark: inPark(p.x, p.y), onShift: !!this.delivery, dtMs, active: !this.paused }, events);
+      this.social.pump(Date.now());
+      if (this.bots.length) this.brain.tick(this.npcCtx());
+      if (tNow > this.weatherAt) {
+        if (this.weatherAt) this.rollWeather();
+        this.weatherAt = tNow + 120000;
       }
-      const hour = Math.floor(this.save.minutes / 60);
-      if (hour !== this.lastHour) {
-        if (this.lastHour !== -1) this.rollWeather();
-        this.lastHour = hour;
-      }
+      this.dirty = true;
     }
 
     // ---- delivery shift
+    if (this.delivery && this.paused) this.delivery.deadline += dt; // the clock stops while a card is up
     if (this.delivery && !this.paused) {
       const d = this.delivery;
       const s = d.stops[d.index];
@@ -554,7 +594,7 @@ export class Engine {
     // ---- nearby door
     let best: Building | null = null;
     let bd = 1.25;
-    for (const b of buildings) {
+    for (const b of places) {
       const f = doorFront(b);
       const d = Math.hypot(f.x - p.x, (f.y - p.y) * 1.3);
       if (d < bd) {
@@ -569,13 +609,6 @@ export class Engine {
 
     // ---- NPCs & remote players
     for (const b of this.bots) updateBot(b, dt);
-    if (this.bots.length && this.t > this.botChatAt) {
-      this.botChatAt = this.t + 16 + Math.random() * 26;
-      const b = this.bots[Math.floor(Math.random() * this.bots.length)];
-      const line = BOT_LINES[Math.floor(Math.random() * BOT_LINES.length)];
-      b.bubble = { text: line, until: this.t + 6 };
-      this.pushChat({ id: 'npc' + this.t, from: b.id, name: b.name, text: line, ts: Date.now(), kind: 'npc' });
-    }
     const now = performance.now();
     for (const [id, r] of this.remotes) {
       const k = Math.min(1, dt * 10);
@@ -615,17 +648,18 @@ export class Engine {
 
   private rollWeather() {
     const was = this.raining;
-    if (this.raining) {
-      if (Math.random() < 0.28) this.raining = false;
-    } else if (Math.random() < 0.13) this.raining = true;
+    if (this.save.flags.heatwave === london().dateKey) this.raining = false;
+    else if (this.raining) {
+      if (Math.random() < 0.3) this.raining = false;
+    } else if (Math.random() < 0.14) this.raining = true;
     if (was !== this.raining) {
       this.dirty = true;
-      this.cb.onEvents([{ type: 'toast', text: this.raining ? (this.save.umbrellaUntil > this.save.minutes ? 'It\u2019s started raining. Good thing you\u2019ve got a brolly.' : 'It\u2019s started raining. Of course it has. (Mood drains in the rain without a brolly.)') : 'Rain\u2019s stopped. Brief moment of national joy.', tone: 'info' }]);
+      this.cb.onEvents([{ type: 'toast', text: this.raining ? (this.save.umbrellaUntil > this.save.life ? 'It\u2019s started raining. Good thing you\u2019ve got a brolly.' : 'It\u2019s started raining. Of course it has. (🧣 Warmth drains in the rain: get a brolly, a coat, or get inside.)') : 'Rain\u2019s stopped. Brief moment of national joy.', tone: 'info' }]);
     }
   }
 
   private playerState(): PlayerState {
-    return { id: this.netId, name: this.save.name, avatar: this.save.avatar, x: +this.player.x.toFixed(2), y: +this.player.y.toFixed(2), facing: this.player.facing, moving: this.player.moving, bike: !!this.delivery };
+    return { id: this.netId, pid: this.save.id, name: this.save.name, avatar: this.save.avatar, x: +this.player.x.toFixed(2), y: +this.player.y.toFixed(2), facing: this.player.facing, moving: this.player.moving, bike: !!this.delivery };
   }
 
   private sendNet(force: boolean) {
@@ -773,6 +807,9 @@ export class Engine {
     for (const v of this.vehicles) if (vis(v.x * TILE, v.y * TILE, 140)) drawVehicle(ctx, v);
 
     // tap marker
+    // spot markers (park bits, bus stop)
+    for (const sp of spots) if (vis(sp.x * TILE, sp.y * TILE)) this.spotMarker(sp, this.nearby === sp);
+
     if (this.tap && this.t - this.tap.t < 0.6) {
       const k = (this.t - this.tap.t) / 0.6;
       ctx.strokeStyle = `rgba(255,255,255,${1 - k})`;
@@ -814,7 +851,7 @@ export class Engine {
     // people, y-sorted
     type Ent = { y: number; draw: () => void; tag: () => void };
     const ents: Ent[] = [];
-    const umbrella = this.raining && this.save.umbrellaUntil > this.save.minutes;
+    const umbrella = this.raining && this.save.umbrellaUntil > this.save.life;
     const p = this.player;
     ents.push({
       y: p.y,
@@ -858,10 +895,12 @@ export class Engine {
     // flying pigeons above people
     for (const g of this.pigeons) if (g.fly > 0 && vis(g.x * TILE, g.y * TILE)) drawPigeon(ctx, g.x * TILE, g.y * TILE, this.t, true, g.flip);
 
-    // night + lamps
-    const c = clock(this.save.minutes);
+    // night + lamps (follows the real sky over London, give or take the season)
+    const c = london();
     const h = c.hh + c.mm / 60;
-    const dark = h < 5 || h >= 21 ? 1 : h < 7 ? 1 - (h - 5) / 2 : h >= 19 ? (h - 19) / 2 : 0;
+    const summer = c.month >= 4 && c.month <= 9;
+    const [dawn, dusk] = summer ? [5, 20.5] : [6.5, 17];
+    const dark = h < dawn - 1 || h >= dusk + 1.5 ? 1 : h < dawn + 1 ? 1 - (h - (dawn - 1)) / 2 : h >= dusk - 0.5 ? (h - (dusk - 0.5)) / 2 : 0;
     const gloom = Math.max(dark * 0.5, this.rainLevel * 0.16);
     if (gloom > 0.01) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -922,6 +961,34 @@ export class Engine {
         ctx.fill();
       }
     }
+  }
+
+  private spotMarker(sp: Building, near: boolean) {
+    const ctx = this.ctx;
+    const x = sp.x * TILE;
+    const y = (sp.y - 1.25) * TILE + Math.sin(this.t * 2.4 + sp.x) * 2.5;
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.beginPath();
+    ctx.ellipse(x, sp.y * TILE + 2, 9, 3.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = near ? '#ffd23f' : 'rgba(255,255,255,0.95)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x - 11, y - 11, 22, 22, 7);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - 4, y + 10);
+    ctx.lineTo(x + 4, y + 10);
+    ctx.lineTo(x, y + 15);
+    ctx.fill();
+    ctx.font = `13px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#000';
+    ctx.fillText(sp.emoji ?? '⭐', x, y + 1);
+    ctx.textBaseline = 'alphabetic';
   }
 
   private nameTag(x: number, y: number, name: string, kind: 'me' | 'npc' | 'player', bubble?: { text: string; until: number } | null) {

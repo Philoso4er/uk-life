@@ -15,35 +15,67 @@ export type Facing = 'down' | 'up' | 'left' | 'right';
 
 export type JobId = 'barista' | 'rider' | 'temp' | 'bus';
 export type HomeId = 'sofa' | 'flatshare' | 'studio' | 'onebed';
-export type GoalId =
-  | 'job'
-  | 'shift'
-  | 'sausage'
-  | 'tube'
-  | 'rent'
-  | 'rentday'
-  | 'pint'
-  | 'chat';
+export type GoalId = 'job' | 'shift' | 'sausage' | 'tube' | 'rent' | 'rentday' | 'pint' | 'chat' | 'ducks' | 'dm' | 'quiz' | 'promo';
+export type NeedId = 'hunger' | 'energy' | 'social' | 'hygiene' | 'warmth';
+export type SkillId = 'fitness' | 'charm' | 'brains' | 'graft';
+
+export interface ActiveMoodlet {
+  id: string;
+  /** life-minute it wears off */
+  until: number;
+}
 
 export interface SaveState {
-  version: 1;
+  version: 2;
   id: string;
   name: string;
   avatar: Avatar;
   money: number;
   oyster: number;
+  // needs, 0-100 (100 = great)
   energy: number;
-  hunger: number; // "fullness": 100 = stuffed, 0 = starving
-  mood: number;
-  minutes: number; // game minutes since Monday 00:00, week 1
+  hunger: number; // "fullness"
+  social: number;
+  hygiene: number;
+  warmth: number; // warm & dry
+  mood: number; // base mood; moodlets sit on top of it
+  moodlets: ActiveMoodlet[];
+  skills: Record<SkillId, number>;
+  /** "life minutes": your personal clock. Ticks with real time (faster while you play) and with every action you do. */
+  life: number;
+  /** real ms the save was last ticked (for offline catch-up) */
+  lastSeen: number;
+  // work
   job: JobId | null;
+  jobLevel: number; // 1-5
+  jobXp: number;
   shifts: number;
+  shiftDay: string; // London date key of shiftsToday
+  shiftsToday: number;
+  lastShiftAt: number; // real ms
+  // home
   home: HomeId;
-  rent: number; // current weekly rent (landlords love a rise)
+  rent: number;
   arrears: number;
-  lastBillWeek: number;
-  umbrellaUntil: number; // game minute the brolly is inevitably lost
+  lastBillKey: string; // Monday date key last billed
+  umbrellaUntil: number; // life-minute the brolly is inevitably lost
+  // things
+  inv: { teabags: number; coat: boolean };
+  cooldowns: Record<string, number>; // action id -> real ms when available again
   goals: Partial<Record<GoalId, boolean>>;
   pos: { x: number; y: number };
-  stats: { earned: number; rentPaid: number; sausageRolls: number; pints: number; tubeTrips: number };
+  stats: { earned: number; rentPaid: number; sausageRolls: number; pints: number; tubeTrips: number; actions: number; quizWins: number; ducksFed: number; posts: number };
+  streak: { day: string; count: number; best: number };
+  // phase 2: home comfort
+  meter: number; // prepayment electric credit (£)
+  heating: boolean;
+  damp: number; // 0-100
+  lastDailyKey: string; // London date of the last daily roll
+  // phase 2: events + benefits
+  flags: Record<string, string | number | boolean>;
+  eventLog: Record<string, number>; // event id -> real ms last fired
+  nextEventAt: number; // real ms
+  uc: { claiming: boolean; appt: string; attended: boolean; searches: number; weekEarned: number; sanctioned: boolean };
+  // phase 3: things to own
+  owned: { items: string[]; btl: number; allotment: null | { planted: number; crop: string }; hustle: null | { kind: string; stock: number; lastPayKey: string } };
 }

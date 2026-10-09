@@ -20,20 +20,23 @@ Working title, prototype stage. Inspired by the *idea* of Lagos Life (a social l
 |---|---|
 | **Character creation** | Name, skin tone, 7 hairstyles, hair colour, 6 outfits (hoodie, puffer, trackie, suit, dress, hi-vis), colour, extras (cap, beanie, specs, headphones). Change your look later at Fade to Grey Barbers for £12. |
 | **Map** | Peckwell: a 60×44-tile neighbourhood with a high street, a residential road, a cross street, an Overground line and a park (pond, bandstand, a trolley in the pond). Two Tube stations and an Overground station. Traffic drives on the **left**, a slow 436 bus holds everyone up, cars stop at zebra crossings, pigeons scatter, trains rattle past, street lamps come on at night and it rains now and then. |
-| **Places** | Peckwell Broadway & Peckwell Common (Tube), Albion Road (Overground), Crumbs & Co. (bakery), Kwik Mart Food & Wine (corner shop), Prêt-à-Pricey (café), PFC Peckwell Fried Chicken, The Leaky Brolly (pub), Jobcentre Minus, Fleecems Lettings, Fade to Grey Barbers, Spin City Launderette, Second Chances charity shop, Peckwell Library, Vape Escape, Pawnderful, Synergy House (office), Peckwell Bus Garage, Inkerman Terrace, plus three places to live. |
-| **Economy loop** | Energy / fullness / mood drain over time. Shops restore them for £. You work shifts to earn money. Rent and council tax leave your account every Monday at 09:00, with a landlord WhatsApp (and a surprise rent rise about 45% of the time, "because of The Market"). Miss a payment and you're in arrears; miss two and you're evicted back to Dave's sofa. Oyster balance pays for fast travel between stations (£2.80). A brolly stops rain hurting your mood, until you lose it (3 days, guaranteed). The park lifts your mood. Run out of energy and you pass out on the night bus. |
+| **Places** | Peckwell Broadway & Peckwell Common (Tube), Albion Road (Overground), Crumbs & Co. (bakery), Kwik Mart Food & Wine (corner shop), Prêt-à-Pricey (café), PFC Peckwell Fried Chicken, The Leaky Brolly (pub), Jobcentre Minus, Fleecems Lettings, Fade to Grey Barbers, Spin City Launderette, Second Chances charity shop, Peckwell Library, LadBroke Bookmakers, PureGrind 24/7 Gym, Pawnderful, Synergy House (office), Peckwell Bus Garage, Inkerman Terrace, plus three places to live, and four outdoor spots with floating markers: the duck pond, the bandstand, the allotments and the 436 bus stop. |
+| **Timed actions** | Every door has a menu of things to do, each taking 4–40 real seconds with a progress bar, a cost, effects and a cheeky result line: buy a round, enter the Tuesday pub quiz (£50 prize), pat Clive the pub dog, use the library's free Wi-Fi (opening hours apply), feed the ducks (peas, not bread), help Nan with her marrows, do a service wash, sit next to the tumble dryers, ask Crumbs if there's any warm ones, lose £2 on a horse called *Nigel's Deposit*, wait for the 436, busk in the ticket hall… about 100 in total. |
+| **Needs & moodlets** | Five needs (⚡ energy, 🍔 fullness, 💬 social, 🫧 hygiene, 🧣 warm & dry) feed your 🙂 mood, and mood scales your pay. Moodlets like *Had a Crumbs* (+8), *Soaked* (−10), *Hangry*, *Whiffy*, *Quiz Champions* or *Swanned* (a swan chased you) nudge mood for a while. Tap the HUD to see them. |
+| **Real UK time** | Peckwell runs on the real Europe/London clock: lamps come on at real dusk, the pub quiz is on real Tuesday nights, and rent leaves your account at the real **Monday 09:00**. While you're out and about your personal "life clock" runs 4× faster so needs actually move. Come back after a break and a capped (12h), gentle catch-up tells you what happened while you were out. Daily login streak with a small reward each day. |
+| **Economy loop** | Needs drain over time; places restore them for £. You work shifts to earn money. Rent and council tax leave your account every Monday at 09:00, with a landlord WhatsApp (and a surprise rent rise about 45% of the time, "because of The Market"). Miss a payment and you're in arrears; miss two and you're evicted back to Dave's sofa. Oyster balance pays for fast travel between stations (£2.80). A brolly stops rain hurting your mood, until you lose it (3 days, guaranteed). The park lifts your mood. Run out of energy and you pass out on the night bus. |
 | **Jobs** (each takes in-game hours) | **Barista** at Prêt-à-Pricey: build drinks in the right order against the clock. **Delivery Rider** at PFC: an on-map shift where you ride to 3 doors with a timer, and quicker drops earn bigger tips. **Office Temp** at Synergy House (unlocks after 1 shift): inbox triage, i.e. reply to the boss, archive the yoghurt thread, report the phishing. **Bus Driver** at the Bus Garage (unlocks after 3 shifts): stop the 436 at the stop. |
-| **Homes** | Dave's sofa (free) → box room in a flatshare (£165/wk) → studio (£295/wk) → one-bed with a concierge (£520/wk). Move in costs a week's rent plus a deposit. Sleep at home to skip to 7am. |
-| **Goals** | 8 onboarding goals on your phone (📱): get a job, finish a shift, eat a sausage roll, tap in with your Oyster, rent your own place, survive rent day, have a pint, say hi in chat. |
+| **Homes** | Dave's sofa (free) → box room in a flatshare (£165/wk) → studio (£295/wk) → one-bed with a concierge (£520/wk). Move in costs a week's rent plus a deposit. Sleep, nap, shower, beans on toast or put the kettle on (teabags required) at home. |
+| **Your phone** (📱) | **Natter**, the local social feed: post, like and reply, while the NPC locals moan about the 436, gossip about what you’ve just done (“{you} at the pond feeding the ducks. Gerald the duck looked so happy.”), reply to your posts, and Big Tel says he can't complain (then complains in a reply thread). **Messages**: one-to-one DMs with locals (typing indicator, occasionally left on read), Mum, Dave, and other real players; landlords and the bank text you here too. Plus Work, Bank (rent countdown), Goals (12), Me (needs, moodlets, skills, stats) and Settings (mute list, allow DMs, help). |
 | **Billboards** | 6 ad slots on the map (rooftops, the railway bridge, the park gate) showing "YOUR AD HERE · £X/week". Tap one for price, estimated footfall and a mock enquiry. No payments are taken and nothing is sent. |
-| **Multiplayer** | See other players walking around in real time with name tags and speech bubbles. Global chat has a 120-character limit, rate limiting (1 message per 1.5s) and a profanity filter. The filter allows mild British banter ("bloody", "git", "muppet"), masks strong swearing including leetspeak, removes slurs, and is re-applied on receive. There's a live player counter in the HUD. |
+| **Multiplayer** | See other players walking around in real time with name tags and speech bubbles. Players' Natter posts appear in everyone's feed and as speech bubbles; DMs go only to the addressed player (they're relayed, **not end-to-end encrypted**, and the UI says so). Posts are limited to 140 characters (1 per 8s), DMs to 200, and everything goes through a profanity filter. Mute and report are on every post and thread. The filter allows mild British banter ("bloody", "git", "muppet"), masks strong swearing including leetspeak, removes slurs, and is re-applied on receive. There's a live player counter in the HUD. |
 | **Persistence** | Your progress saves to `localStorage` every few seconds and when the tab is hidden. |
-| **Controls** | Tap or click to walk there (hold to keep walking). Tap a building to walk to its door and go in. WASD or arrow keys also work. `E`/`Enter` goes in, `T` opens chat, `Esc` closes things. |
+| **Controls** | Tap or click to walk there (hold to keep walking). Tap a building to walk to its door and go in. WASD or arrow keys also work. `E`/`Enter` goes in, `T` opens Natter, `P` opens the phone, `Esc` closes things. |
 
 ### Single-player vs multiplayer
 
-- **No env vars (default, e.g. local dev or a fresh Vercel deploy):** the HUD shows **Offline mode**. Peckwell is populated by 8 NPC locals (tagged `NPC`) who wander between shops and occasionally moan in chat. Other tabs in **the same browser** also show up as real players over `BroadcastChannel`, which is handy for testing.
-- **With `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`:** everyone joins one Supabase Realtime channel (`uklife:peckwell`). **Presence** handles who's online and the player count. **Broadcast** carries positions (about 5 messages/s while moving, plus a heartbeat every 2.5s) and chat. 4 NPCs still wander around locally so the street never feels dead. They're clearly tagged and their chat lines only appear on your own screen.
+- **No env vars (default, e.g. local dev or a fresh Vercel deploy):** the HUD shows **Offline mode**. Peckwell is populated by 8 NPC locals (tagged `NPC`) who wander between shops and post on Natter. Other tabs in **the same browser** also show up as real players over `BroadcastChannel`, which is handy for testing.
+- **With `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`:** everyone joins one Supabase Realtime channel (`uklife:peckwell`). **Presence** handles who's online and the player count. **Broadcast** carries positions (about 5 messages/s while moving, plus a heartbeat every 2.5s), Natter posts, likes and DMs. 4 NPCs still wander around locally so the street never feels dead. They're clearly tagged and their posts only appear on your own screen.
 - Your money, job, home and stats are always local to your device. Nothing economic is shared or server-authoritative yet (see caveats).
 
 ---
@@ -49,7 +52,7 @@ Other scripts:
 
 ```bash
 npm run typecheck    # tsc --noEmit
-npm test             # vitest: filter, wire sanitising, economy/billing, map connectivity, two-client BroadcastChannel transport
+npm test             # vitest: London clock + rent key, billing, catch-up, streaks, save migration, needs/moodlets, timed actions, social store + NPC brain, filter, wire sanitising, map, two-client transport
 npm run build        # typecheck + production build to dist/
 npm run preview      # serve dist/ on http://localhost:4173
 
@@ -59,7 +62,7 @@ npm run shots        # writes ./shots/*.png
 npm run test:mp
 ```
 
-Add `?debug=1` to the URL to expose `window.__ukl` (the engine) in the console, e.g. `__ukl.engine.setRain(true)` or `__ukl.engine.save.minutes = 10080 + 539` (one minute before rent day).
+Add `?debug=1` to the URL to expose `window.__ukl` (the engine) in the console, e.g. `__ukl.engine.setRain(true)` or `__ukl.setClockOffset(__ukl.msUntilRent() - 5000)` (five seconds before rent day). `?debug=1&clock=<ms>` starts the whole game shifted in time.
 
 To enable multiplayer locally, copy `.env.example` to `.env.local` and fill it in.
 
@@ -95,15 +98,20 @@ src/
     render.ts     pre-rendered static world + dynamic drawing (vehicles, billboards, pigeons, train)
     avatar.ts     procedural character drawing + options
     engine.ts     game loop, input, camera, collisions, NPCs, ambient life, net sync, snapshot store
-    economy.ts    needs, jobs, shops, homes, rent/council tax, landlord messages, save/load
+    time.ts       real Europe/London clock, rent key (Monday 09:00), debug clock offset
+    needs.ts      needs, moodlets, mood, passing time
+    actions.ts    every place's timed actions (costs, effects, outcomes)
+    economy.ts    jobs + career ladders, homes, rent/council tax, streaks, catch-up, save/load + migration
+    social.ts     Natter feed + Messages store (posts, likes, replies, DMs, mute/report)
+    npcs.ts       NPC personas, their posts, gossip, replies and DMs
     pathfind.ts   A* + path smoothing for tap-to-move
-    bots.ts       NPC walkers + their chat lines
+    bots.ts       NPC walkers
   net/
     supabase.ts   Supabase Realtime transport (presence + broadcast)
     local.ts      BroadcastChannel transport (offline mode / tests)
-    filter.ts     chat profanity filter + length limits
+    filter.ts     profanity filter + length limits
     types.ts      wire types + sanitising
-  ui/             React screens: title, creator, HUD, chat, dialogs, mini-games
+  ui/             React screens: title, creator, HUD, place menus, phone, event cards, mini-games
 scripts/          Playwright screenshot tour + two-tab multiplayer check
 ```
 
@@ -116,18 +124,18 @@ scripts/          Playwright screenshot tour + two-tab multiplayer check
 - **Paid billboards:** a self-serve booking flow with Stripe Checkout, uploaded creative with moderation, impression counts from real player footfall, and a scheduling calendar.
 - **Housing upgrades:** furnish your flat, flatmates (other players), house parties, buy-to-let as a late-game grind, and Right to Buy jokes.
 - **Server-side economy:** move money and rent to Supabase (Postgres + RLS + edge functions) so progress follows you across devices and can't be faked. Add accounts via magic link.
-- **Social:** proximity chat and DMs, emotes (the British nod), a pub quiz night event, five-a-side in the park.
+- **Social:** emotes (the British nod), group chats, shared likes/history via a database, five-a-side as a real multiplayer event.
 - **Seasonal events:** Notting Hill-ish carnival, Bonfire Night, a heatwave (24°C, a national emergency), a Boxing Day sale queue.
 - **Moderation:** report/mute, server-side filtering, and rate limits enforced by an edge function.
 - **Sound:** rain ambience, Tube chimes, "mind the gap".
 
 ## Honest caveats
 
-- Multiplayer is **positions + chat only**. The economy is client-side, so it's easy to cheat in your own save, which is fine for a prototype.
+- Multiplayer is **positions + Natter posts/likes/DMs only**. Feed history and like counts are per-device (they aren't stored on a server), and NPC posts are local to each player. The economy is client-side, so it's easy to cheat in your own save, which is fine for a prototype.
 - The Supabase transport has been type-checked against `@supabase/supabase-js` v2 but **not tested against a live project** (no credentials were available while building this). The same code paths (remote players, interpolation, chat, counter) were tested end-to-end with the BroadcastChannel transport in two headless tabs, plus unit tests.
 - On Supabase's free tier, the realtime **message quota** will be the first thing you hit if it gets busy: every position update is fanned out to every connected player. Check the current plan limits. Before going big, add area-based channels, lower the tick rate or move to a dedicated game server.
 - The profanity filter is a word list. It's decent but beatable.
-- A game day lasts about 3 real minutes and a week about 21, so rent day comes round quickly.
+- Time is real: rent day is once a real week. Your needs run on a faster personal "life clock" while you play, so the two don't line up exactly (by design).
 - Parody names are deliberately not real trademarks, and the station mark is our own diamond, not the TfL roundel. It's still worth a sanity check before any commercial launch.
 
 ## Credits

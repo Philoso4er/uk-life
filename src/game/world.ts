@@ -33,6 +33,9 @@ export type BuildingKind =
   | 'busgarage'
   | 'barber'
   | 'home'
+  | 'bookies'
+  | 'gym'
+  | 'spot'
   | 'decor';
 
 export interface Building {
@@ -54,6 +57,8 @@ export interface Building {
   blurb: string;
   tube?: string; // station id for tube buildings
   homeId?: 'sofa' | 'flatshare' | 'studio' | 'onebed';
+  /** spots only: emoji marker floating above them */
+  emoji?: string;
 }
 
 export interface Billboard {
@@ -87,7 +92,7 @@ export const buildings: Building[] = [
   B({ id: 'pret', name: 'Prêt-à-Pricey', sign: 'PRÊT-À-PRICEY', kind: 'cafe', x: 27, y: 13, w: 6, h: 5, door: 3, facade: '#7b1730', roof: '#4b4b52', signBg: '#7b1730', signFg: '#f6e7c1', awning: '#7b1730', blurb: 'Artisanal everything. £6.95 for a sandwich that has seen an avocado once.' }),
   B({ id: 'jobcentre', name: 'Jobcentre Minus', sign: 'JOBCENTRE MINUS', kind: 'jobcentre', x: 33, y: 13, w: 7, h: 5, door: 3, facade: '#d5d2c8', roof: '#6a6a70', signBg: '#00786f', signFg: '#ffffff', blurb: 'Take a ticket. Your number is 412. They are serving number 9.' }),
   B({ id: 'pub', name: 'The Leaky Brolly', sign: 'THE LEAKY BROLLY', kind: 'pub', x: 40, y: 13, w: 7, h: 5, door: 3, facade: '#1e3a2b', roof: '#4a3b33', signBg: '#1e3a2b', signFg: '#e4c46a', blurb: 'Proper boozer. Sticky carpet, pub quiz Tuesdays, a dog called Clive.' }),
-  B({ id: 'vape', name: 'Vape Escape', sign: 'VAPE ESCAPE', kind: 'decor', x: 47, y: 13, w: 5, h: 5, door: 2, facade: '#2a1f3d', roof: '#504a5a', signBg: '#ff3fb4', signFg: '#ffffff', blurb: 'Sells 400 flavours of fog, including "Blue Razz Ice Mango Storm". Always "closing down".' }),
+  B({ id: 'bookies', name: 'LadBroke Bookmakers', sign: 'LADBROKE · BETS', kind: 'bookies', x: 47, y: 13, w: 5, h: 5, door: 2, facade: '#123b2a', roof: '#504a5a', signBg: '#0f7a3d', signFg: '#ffffff', blurb: 'Used to be a vape shop. Before that, a bookies. Before that, a different bookies. “When the fun stops, stop.” (It stopped in 2004.)' }),
   B({ id: 'pawn', name: 'Pawnderful', sign: 'PAWNDERFUL · CASH 4 GOLD', kind: 'decor', x: 52, y: 13, w: 7, h: 5, door: 3, facade: '#e2b33b', roof: '#5b5555', signBg: '#111111', signFg: '#ffd23f', blurb: 'Cash for gold, phones, and that bread maker you used once. Sign says "Back in 5 mins" (since 2019).' }),
 
   // ---- Peckwell High Street, south side ----
@@ -102,9 +107,19 @@ export const buildings: Building[] = [
   B({ id: 'terrace1', name: 'Inkerman Terrace', sign: '', kind: 'decor', x: 1, y: 31, w: 5, h: 5, door: 2, facade: '#b5654a', roof: '#4f4545', signBg: '#000', signFg: '#fff', blurb: 'Victorian terrace. Worth £1.2m. Bathroom from 1974.' }),
   B({ id: 'terrace2', name: 'Inkerman Terrace', sign: '', kind: 'decor', x: 6, y: 31, w: 5, h: 5, door: 2, facade: '#c27a55', roof: '#4f4545', signBg: '#000', signFg: '#fff', blurb: 'There is a Bugaboo pram in the hallway and a passive-aggressive note about bins.' }),
   B({ id: 'terrace3', name: 'Inkerman Terrace', sign: '', kind: 'decor', x: 11, y: 31, w: 5, h: 5, door: 2, facade: '#a85a45', roof: '#4f4545', signBg: '#000', signFg: '#fff', blurb: 'Loft conversion in progress since the last general election.' }),
-  B({ id: 'terrace4', name: 'Inkerman Terrace', sign: '', kind: 'decor', x: 16, y: 31, w: 5, h: 5, door: 2, facade: '#bf6b50', roof: '#4f4545', signBg: '#000', signFg: '#fff', blurb: 'Curtains twitch. Neighbourhood WhatsApp group has been informed of your presence.' }),
+  B({ id: 'gym', name: 'PureGrind 24/7 Gym', sign: 'PUREGRIND 24/7', kind: 'gym', x: 16, y: 31, w: 5, h: 5, door: 2, facade: '#2b2d33', roof: '#4f4545', signBg: '#ff6a00', signFg: '#111111', blurb: 'Converted end-of-terrace. Open 24/7. The squat rack has been occupied by the same man since January.' }),
   B({ id: 'common', name: 'Peckwell Common', sign: 'PECKWELL COMMON', kind: 'tube', tube: 'common', x: 14, y: 38, w: 7, h: 4, door: 3, facade: '#a8382f', roof: '#3a3a3a', signBg: '#ffffff', signFg: '#1d3f9a', blurb: 'Underground station by the park. The escalator has been "under repair" for a generation.' }),
 ];
+
+/** Things you can use that aren't buildings: park bits and the bus stop. Not drawn by the prerender. */
+const spot = (id: string, name: string, x: number, y: number, emoji: string, blurb: string): Building => ({ id, name, sign: '', kind: 'spot', x, y, w: 0, h: 0, door: 0, facade: '#000', roof: '#000', signBg: '#000', signFg: '#fff', blurb, emoji });
+export const spots: Building[] = [
+  spot('pond', 'The Duck Pond', 42.5, 33.25, '🦆', 'Ducks, a trolley, and a swan with a criminal record. A sign says “Please don’t feed the ducks bread”. Everyone does.'),
+  spot('bandstand', 'The Bandstand', 54, 39.7, '🎸', 'Victorian bandstand. Currently hosting a man called Tez and his acoustic guitar.'),
+  spot('allotments', 'Peckwell Allotments', 6.5, 37.35, '🥕', 'Waiting list: 14 years. Marrows the size of toddlers. Nan is in charge, unofficially.'),
+  spot('busstop', '436 Bus Stop', 46.2, 19.3, '🚌', 'Route 436. Every 8 minutes, or three at once after 40 minutes. Sometimes both.'),
+];
+export const places: Building[] = [];
 
 export const billboards: Billboard[] = [
   { id: 'bb-bridge', name: 'Railway Bridge Banner', x: 21.6, y: 0.1, w: 4.8, h: 1.7, price: 99, footfall: '~40,000 delayed commuters / week', blurb: 'Hung off the railway bridge. Every train that stops "due to a signal failure" stares right at you.' },
@@ -228,14 +243,15 @@ export const isSolid = (tx: number, ty: number) => {
 };
 
 /** Pavement point in front of a building's door, in tile units. */
-export const doorFront = (b: Building) => ({ x: b.x + b.door + 0.5, y: b.face === 'N' ? b.y - 0.55 : b.y + b.h + 0.55 });
+export const doorFront = (b: Building) => (b.kind === 'spot' ? { x: b.x, y: b.y } : { x: b.x + b.door + 0.5, y: b.face === 'N' ? b.y - 0.55 : b.y + b.h + 0.55 });
 
 export const PARK = { x0: 26, y0: 31, x1: W, y1: H };
 export const inPark = (x: number, y: number) => x >= PARK.x0 && x < PARK.x1 && y >= PARK.y0 && y < PARK.y1;
 
 export const SPAWN = doorFront(buildings[0]);
 
-export const buildingById = (id: string) => buildings.find((b) => b.id === id)!;
+places.push(...buildings, ...spots);
+export const buildingById = (id: string) => places.find((b) => b.id === id)!;
 
 /** Doors you could plausibly deliver chicken to. */
 export const deliveryDoors: { name: string; x: number; y: number }[] = [
@@ -247,5 +263,6 @@ export const deliveryDoors: { name: string; x: number; y: number }[] = [
 
 export const NPC_SPOTS = [
   ...buildings.filter((b) => b.kind !== 'home').map(doorFront),
+  ...spots.map(doorFront),
   { x: 34, y: 33 }, { x: 46, y: 41 }, { x: 52, y: 27 }, { x: 40, y: 22.6 }, { x: 10, y: 22.6 }, { x: 30, y: 19 }, { x: 5, y: 36.5 },
 ];

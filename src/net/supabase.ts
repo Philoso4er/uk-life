@@ -1,9 +1,11 @@
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
-import { sanitizeChat, sanitizePlayer, type ChatMessage, type NetHandlers, type PlayerState, type Transport } from './types';
+import { sanitizePlayer, sanitizeSocial, type NetHandlers, type PlayerState, type SocialWire, type Transport } from './types';
 
 /**
  * Real multiplayer via Supabase Realtime: Presence (who's online + count) and
- * Broadcast (positions + chat). No database tables needed.
+ * Broadcast (positions + Natter posts/likes + DMs). No database tables needed.
+ * DMs ride the same public channel with a `to` field and are dropped by everyone
+ * else's client; they are private-ish, not end-to-end encrypted (the UI says so).
  */
 export class SupabaseTransport implements Transport {
   readonly mode = 'online' as const;
@@ -41,9 +43,9 @@ export class SupabaseTransport implements Transport {
       const p = sanitizePlayer(payload);
       if (p && p.id !== this.me.id) h.onState(p);
     });
-    ch.on('broadcast', { event: 'chat' }, ({ payload }) => {
-      const m = sanitizeChat(payload);
-      if (m && m.from !== this.me.id) h.onChat(m);
+    ch.on('broadcast', { event: 'social' }, ({ payload }) => {
+      const m = sanitizeSocial(payload);
+      if (m) h.onSocial(m);
     });
     await new Promise<void>((resolve) => {
       let done = false;
@@ -80,9 +82,9 @@ export class SupabaseTransport implements Transport {
     if (this.ready) void this.ch?.track({ p, at: Date.now() });
   }
 
-  sendChat(m: ChatMessage) {
+  sendSocial(m: SocialWire) {
     if (!this.ready || !this.ch) return;
-    void this.ch.send({ type: 'broadcast', event: 'chat', payload: m });
+    void this.ch.send({ type: 'broadcast', event: 'social', payload: m });
   }
 
   stop() {
