@@ -19,10 +19,10 @@ export function AvatarCanvas({ avatar, size = 96, animate = false, facing = 'dow
       const t = (now - start) / 1000;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, c.width, c.height);
-      const s = (size / 48) * dpr;
-      ctx.setTransform(s, 0, 0, s, (size / 2) * dpr, size * 0.86 * dpr);
-      const f = animate ? order[Math.floor(t / 1.6) % 4] : facing;
-      drawAvatar(ctx, avRef.current, { facing: f, moving: animate && Math.floor(t / 1.6) % 2 === 1, t });
+      const s = (size / 54) * dpr;
+      ctx.setTransform(s, 0, 0, s, (size / 2) * dpr, size * 0.9 * dpr);
+      const f = animate ? order[Math.floor(t / 2) % 4] : facing;
+      drawAvatar(ctx, avRef.current, { facing: f, moving: animate && f !== 'down', t });
       if (animate) raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);

@@ -1,6 +1,7 @@
-export type HairStyle = 'short' | 'long' | 'bun' | 'afro' | 'bald' | 'mohawk' | 'braids';
-export type OutfitStyle = 'hoodie' | 'suit' | 'puffer' | 'tracksuit' | 'dress' | 'hivis';
-export type Accessory = 'none' | 'cap' | 'glasses' | 'headphones' | 'beanie';
+export type HairStyle = 'short' | 'long' | 'bun' | 'afro' | 'bald' | 'mohawk' | 'braids' | 'ponytail' | 'curly' | 'fade';
+export type OutfitStyle = 'hoodie' | 'suit' | 'puffer' | 'tracksuit' | 'dress' | 'hivis' | 'mac' | 'knit' | 'football';
+export type Accessory = 'none' | 'cap' | 'glasses' | 'headphones' | 'beanie' | 'scarf' | 'flatcap';
+export type Beard = 'none' | 'stubble' | 'beard' | 'tache';
 
 export interface Avatar {
   skin: string;
@@ -9,6 +10,8 @@ export interface Avatar {
   outfit: OutfitStyle;
   outfitColor: string;
   accessory: Accessory;
+  /** optional so older saves and older clients' avatars stay valid */
+  beard?: Beard;
 }
 
 export type Facing = 'down' | 'up' | 'left' | 'right';

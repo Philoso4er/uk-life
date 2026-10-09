@@ -1,6 +1,6 @@
 // Peckwell's residents: who they are, what they moan about on Natter, and how
 // they answer your DMs. Everything here is local to your device (clearly tagged NPC).
-import { randomAvatar } from './avatar';
+import { avatarForName } from './avatar';
 import type { Avatar, SaveState } from './types';
 import { handleOf, type Author, type SocialStore } from './social';
 
@@ -249,7 +249,8 @@ export class NpcBrain {
   private avatarFor(name: string) {
     let a = this.avatars.get(name);
     if (!a) {
-      a = randomAvatar();
+      // same name, same face, every session (and the same face as their walking sprite)
+      a = avatarForName(name);
       this.avatars.set(name, a);
     }
     return a;
@@ -260,13 +261,22 @@ export class NpcBrain {
   author(p: Persona) {
     return personaAuthor(p, this.avatarFor(p.name));
   }
+  /** Personas who can post/reply/DM. If you've named yourself Priya, the NPC Priya keeps quiet (no doppelgängers). */
+  private cast() {
+    const me = this.save.name.trim().toLowerCase();
+    const c = PERSONAS.filter((p) => p.name.toLowerCase() !== me);
+    return c.length ? c : PERSONAS;
+  }
+  private get tel() {
+    return this.cast().find((p) => p.name === 'Big Tel') ?? null;
+  }
 
   /** Fill an empty feed with a believable last hour of Peckwell. */
   seed(ctx: Ctx) {
     if (this.social.getSnapshot().posts.length >= 6) return;
     const t = Date.now();
     for (let i = 0; i < 9; i++) {
-      const p = pickOf(PERSONAS);
+      const p = pickOf(this.cast());
       const text = this.compose(p, ctx);
       this.social.npcPost(this.author(p), text, { ts: t - (i + 1) * rnd(3, 9) * 60000, likes: Math.floor(rnd(0, 14)) });
     }
@@ -296,19 +306,19 @@ export class NpcBrain {
     const t = Date.now();
     if (t >= this.nextPost) {
       this.nextPost = t + rnd(18000, 38000);
-      let p = pickOf(PERSONAS);
+      let p = pickOf(this.cast());
       let text: string;
       if (this.gossipQ.length) {
         const key = this.gossipQ.shift()!;
         text = pickOf(GOSSIP[key]).replace('{me}', this.save.name);
       } else text = this.compose(p, ctx);
-      if (/can.t complain/i.test(text)) p = PERSONAS[0];
+      if (/can.t complain/i.test(text) && this.tel) p = this.tel;
       const post = this.social.npcPost(this.author(p), text, { likes: Math.floor(rnd(0, 4)) });
       this.onSpeak?.(p.name, text);
       // likes trickle in
       for (let i = 0; i < 3; i++) this.social.later(rnd(4000, 40000), () => this.social.bumpLikes(post.id, Math.random() < 0.6 ? 1 : 2));
       // Big Tel can't complain. Then complains.
-      if (/can.t complain/i.test(text)) this.complain(post.id);
+      if (/can.t complain/i.test(text) && p === this.tel) this.complain(post.id);
     }
     if (t >= this.nextDM && this.dmsSent < 5) {
       this.nextDM = t + rnd(150000, 300000);
@@ -317,7 +327,7 @@ export class NpcBrain {
       if (r < 0.18) this.social.incoming(contactAuthor('mum'), pickOf(MUM_LINES));
       else if (r < 0.28 && this.save.home !== 'sofa') this.social.incoming(contactAuthor('dave'), pickOf(DAVE_LINES));
       else {
-        const p = pickOf(PERSONAS);
+        const p = pickOf(this.cast());
         this.social.incoming(this.author(p), pickOf(p.openers));
       }
     }
@@ -330,7 +340,7 @@ export class NpcBrain {
     let at = 0;
     lines.forEach((line) => {
       at += rnd(9000, 16000);
-      this.social.later(at, () => this.social.npcPost(this.author(PERSONAS[0]), line, { replyTo: postId }));
+      this.social.later(at, () => this.social.npcPost(this.author(this.tel ?? PERSONAS[0]), line, { replyTo: postId }));
     });
   }
 
@@ -338,12 +348,12 @@ export class NpcBrain {
     const n = 1 + Math.floor(Math.random() * 4);
     for (let i = 0; i < n; i++) this.social.later(rnd(3000, 25000), () => this.social.bumpLikes(postId));
     if (Math.random() < 0.75) {
-      const p = pickOf(PERSONAS);
+      const p = pickOf(this.cast());
       const kw = REPLY_BY_KEYWORD.find((k) => k.re.test(text));
       const line = kw && Math.random() < 0.7 ? pickOf(kw.lines) : Math.random() < 0.5 ? pickOf(p.replies) : pickOf(GENERIC_REPLIES);
       this.social.later(rnd(6000, 16000), () => this.social.npcPost(this.author(p), line, { replyTo: postId }));
       if (Math.random() < 0.35) {
-        const q = pickOf(PERSONAS.filter((x) => x !== p));
+        const q = pickOf(this.cast().filter((x) => x !== p));
         this.social.later(rnd(18000, 34000), () => this.social.npcPost(this.author(q), pickOf(q.replies), { replyTo: postId }));
       }
     }

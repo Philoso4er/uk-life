@@ -1,0 +1,24 @@
+<!doctype html><html><body style="margin:0;background:#8fa36b">
+<canvas id="c"></canvas>
+<script type="module">
+import { drawAvatar, randomAvatar, rng, drawPortrait } from '/src/game/avatar.ts';
+const c = document.getElementById('c');
+const W = 1400, H = 900; c.width = W; c.height = H; c.style.width = W + 'px';
+const ctx = c.getContext('2d');
+const r = rng(Number(new URLSearchParams(location.search).get('seed') || 7));
+const avs = Array.from({ length: 10 }, () => randomAvatar(r));
+const S = 2.5;
+// row per avatar group: down idle, down walk 0..3, side walk frames, up
+avs.forEach((a, i) => {
+  const col = i % 5, row = Math.floor(i / 5);
+  const bx = 30 + col * 270, by = 30 + row * 420;
+  const poses = [['down', false, 0], ['down', true, 0.06], ['right', true, 0], ['right', true, 0.115], ['left', true, 0.23], ['up', true, 0.17]];
+  poses.forEach(([f, m, t], k) => {
+    ctx.setTransform(S, 0, 0, S, bx + 40 + (k % 3) * 85, by + 140 + Math.floor(k / 3) * 160);
+    drawAvatar(ctx, a, { facing: f, moving: m, t, phone: k === 0 && i % 3 === 0 });
+  });
+  ctx.setTransform(1, 0, 0, 1, bx + 200, by + 330);
+  drawPortrait(ctx, a, 56);
+});
+window.done = true;
+</script></body></html>

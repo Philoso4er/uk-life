@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ACCESSORIES, ACC_LABEL, HAIRS, HAIR_COLOURS, HAIR_LABEL, OUTFITS, OUTFIT_COLOURS, OUTFIT_LABEL, SKINS, randomAvatar } from '../game/avatar';
+import { ACCESSORIES, ACC_LABEL, BEARDS, BEARD_LABEL, HAIRS, HAIR_COLOURS, HAIR_LABEL, OUTFITS, OUTFIT_COLOURS, OUTFIT_LABEL, SKINS, randomAvatar } from '../game/avatar';
 import type { Avatar } from '../game/types';
 import { AvatarCanvas } from './AvatarCanvas';
 import { MAX_NAME } from '../net/filter';
@@ -85,6 +85,13 @@ export function Creator({
               {ACCESSORIES.map((x) => (
                 <Chip key={x} on={a.accessory === x} onClick={() => set('accessory', x)}>
                   {ACC_LABEL[x]}
+                </Chip>
+              ))}
+            </Row>
+            <Row label="Face">
+              {BEARDS.map((b) => (
+                <Chip key={b} on={(a.beard ?? 'none') === b} onClick={() => set('beard', b)}>
+                  {b === 'none' ? 'Clean' : BEARD_LABEL[b]}
                 </Chip>
               ))}
             </Row>
