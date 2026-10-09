@@ -2,6 +2,10 @@ export type HairStyle = 'short' | 'long' | 'bun' | 'afro' | 'bald' | 'mohawk' | 
 export type OutfitStyle = 'hoodie' | 'suit' | 'puffer' | 'tracksuit' | 'dress' | 'hivis' | 'mac' | 'knit' | 'football';
 export type Accessory = 'none' | 'cap' | 'glasses' | 'headphones' | 'beanie' | 'scarf' | 'flatcap';
 export type Beard = 'none' | 'stubble' | 'beard' | 'tache';
+/** How the character presents (and their body build in the art). Every style is open to every gender. */
+export type Gender = 'male' | 'female' | 'other';
+/** Which pronouns the game uses for you in the third person (gossip, NPC chat). */
+export type Pronouns = 'he' | 'she' | 'they';
 
 export interface Avatar {
   skin: string;
@@ -12,6 +16,10 @@ export interface Avatar {
   accessory: Accessory;
   /** optional so older saves and older clients' avatars stay valid */
   beard?: Beard;
+  /** optional for the same reason; missing = 'other' (an androgynous build) */
+  gender?: Gender;
+  /** missing = they/them */
+  pronouns?: Pronouns;
 }
 
 export type Facing = 'down' | 'up' | 'left' | 'right';

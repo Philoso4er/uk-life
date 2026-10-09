@@ -1,6 +1,7 @@
 // Peckwell's residents: who they are, what they moan about on Natter, and how
 // they answer your DMs. Everything here is local to your device (clearly tagged NPC).
-import { avatarForName } from './avatar';
+import { npcAvatar } from './bots';
+import { aboutPerson, pronounText, pronounsOf } from './pronouns';
 import type { Avatar, SaveState } from './types';
 import { handleOf, type Author, type SocialStore } from './social';
 
@@ -79,14 +80,14 @@ export const PERSONAS: Persona[] = [
     dm: ['Haha ❤️', 'So tired. So, so tired.', 'Agreed.', 'Gotta sleep, chat later x', 'You’re a star.'],
   },
   {
-    name: 'Femi', colour: '#f39c12', bio: 'DJ, producer, part-time Bluetooth speaker repair man.',
+    name: 'Femi', colour: '#f39c12', bio: 'DJ, producer, part-time Bluetooth speaker fixer. They/them.',
     posts: ['New mix dropping Friday. Recorded it in my nan’s box room. Acoustics: elite.', 'Played a set at the Brolly. Big Tel requested Lionel Richie 4 times. I played it 4 times.', 'If anyone finds a USB stick with 400 versions of the same track, that’s mine.', 'Peckwell Carnival-ish committee meeting tonight. Sound system talks only.', 'Producing a track made entirely of 436 bus noises. Working title: “Not In Service”.'],
     replies: ['Big tune.', 'Vibes ✨', 'Say less.', 'This goes hard.', 'Sampling this.'],
     openers: ['Yo! Playing the Brolly Friday. Come through, bring people.', 'You got a good voice? I need someone to say “mind the gap” for a track.'],
     dm: ['Vibes.', 'Say less.', 'Big up.', 'Come to the set Friday!', 'Hard.'],
   },
   {
-    name: 'Hamza', colour: '#00897b', bio: 'Final-year student. Dissertation due. Has not started.',
+    name: 'Hamza', colour: '#00897b', bio: 'Final-year student (they/them). Dissertation due. Has not started.',
     posts: ['Dissertation due Friday. Word count: my name.', 'Overdraft update: I am now the overdraft.', 'Library is shut. Wrote 200 words on the steps with stolen Wi-Fi like a Victorian orphan.', 'Free samples at Prêt-à-Pricey today. This is my dinner.', 'Group project update: I am the group.'],
     replies: ['Lmao real', 'This is so real', 'Not me reading this in the library instead of working', 'Facts', 'Hahaha'],
     openers: ['Do you know anything about 18th-century economic history. Asking for my degree.', 'Lowkey do you want to be in my survey. It’s 40 questions. It’s for a grade.'],
@@ -149,33 +150,43 @@ const CONTEXT: { when: (c: Ctx) => boolean; lines: string[] }[] = [
   { when: (c) => !!c.flags.heatwave, lines: ['IT’S 24 DEGREES. STAY INDOORS. DRINK WATER. CHECK ON NAN.', 'Heatwave. The Tube is now a sauna you pay £2.80 for.', 'Fans sold out at Kwik Mart. Using a Crumbs bag as a fan.'] },
 ];
 
-/** Things NPCs say after seeing you do something. {me} = your name. */
+/** Locals talking about each other. {me} = the other local; pronoun tokens use THEIR pronouns (see pronouns.ts). */
+const NEIGHBOUR_LINES = [
+  'Saw {me} at Kwik Mart buying one single onion. {They} looked very sure about it.',
+  'Shout out to {me} for holding the door at Crumbs. {Theyre} a legend.',
+  '{me} still owes me a fiver from the quiz. {They} know{s} what {they} did.',
+  'Bumped into {me} at the 436 stop. {They} {has} been waiting since Tuesday, apparently.',
+  'Has anyone seen {me}? {Their} washing has been going round at Spin City since Monday.',
+  '{me} lent me {their} brolly in the rain. Peckwell is healing.',
+];
+
+/** Things NPCs say after seeing you do something. {me} = your name; {they}/{them}/{their}… = your pronouns. */
 const GOSSIP: Record<string, string[]> = {
-  status: ['{me} has bought an air fryer or something and won’t shut up about it. Happy for them. Genuinely.', 'Saw a courier leave a parcel in {me}’s bin. Classic.', '{me} has “treated themselves”. We all know what that means. Klarna-ish.'],
+  status: ['{me} has bought an air fryer or something and won’t shut up about it. Happy for {them}. Genuinely.', 'Saw a courier leave a parcel in {me}’s bin. Classic.', '{me} has “treated {themself}”. We all know what that means. Klarna-ish.'],
   plot: ['{me} has got an allotment plot?! I’ve been on that waiting list since 2011.', 'Nan’s pulled strings for {me} at the allotments. Doris is FUMING.'],
-  veg: ['{me} grew radishes and is acting like they invented farming.', 'Got given a home-grown spud by {me}. It was a spud. Nice spud though.'],
+  veg: ['{me} grew radishes and is acting like {they} invented farming.', 'Got given a home-grown spud by {me}. It was a spud. Nice spud though.'],
   marrow: ['{me} BEAT NAN at the Peckwell Show. Marrow class. Absolute scenes.', 'Massive upset at the marrow show. Nan has demanded a recount.'],
   landlord: ['{me} has bought a flat to rent out. Another one lost to the dark side.', 'Heard {me} is a landlord now. Nigel has a new friend.'],
   flogit: ['{me} is flipping charity shop finds on Flogit now. The bread maker economy is booming.', 'Bought a fondue set off {me} on Flogit. It was “smoke-free”. It was not.'],
   sausage: ['Just watched {me} eat a sausage roll in four bites. Respect.', 'The Crumbs queue is moving today. {me} was in and out like a pro.'],
-  ducks: ['Someone fed the ducks peas, not bread. Finally. A hero walks among us.', '{me} at the pond feeding the ducks. Gerald the duck looked so happy.'],
+  ducks: ['Someone fed the ducks peas, not bread. Finally. A hero walks among us.', '{me} at the pond feeding the ducks. Gerald the duck has decided {theyre} his favourite.'],
   swanned: ['Just watched a swan chase {me} round the pond twice. 10/10 would watch again.', 'The swan is back on its nonsense. Stay safe out there.'],
-  round: ['{me} just got a round in at the Brolly. A LEGEND. Big Tel is emotional.', 'Who got the round in? {me}. Write that down.'],
+  round: ['{me} just got a round in at the Brolly. A LEGEND. Big Tel is emotional.', 'Who got the round in? {me}. Write that down. {They} {is} welcome at our table any time.'],
   quiz_win: ['{me}’s team won the quiz at the Brolly. Robbed. ROBBED. (Congrats.)', 'Quiz result: the newcomers won. Big Tel demanding a recount.'],
   quiz_lose: ['Quiz results are in: our lot came fourth again. {me} knew the music round answer and SAID NOTHING.'],
-  gym: ['{me} posted a gym selfie. The lighting in PureGrind is unkind to us all.', 'Saw {me} at PureGrind. Leg day? Leg day.'],
+  gym: ['{me} posted a gym selfie. The lighting in PureGrind is unkind to us all.', 'Saw {me} at PureGrind. {They} said it was leg day. With {them} it is always leg day.'],
   bookies_win: ['{me} won at LadBroke and now won’t stop talking about horses.'],
   bookies_lose: ['Heard someone at LadBroke lost on the last leg. Every time. Every single time.'],
-  justone: ['{me} said “just the one” at 6pm. It is now 11. Classic.', '“Just the one” update: it was not just the one.'],
+  justone: ['{me} said “just the one” at 6pm. It is now 11. Classic.', '“Just the one” update: it was not just the one. {me}’s coat is still on {their} stool.'],
   five: ['Five-a-side by the bandstand today. {me} scored a worldie then pulled something.'],
   busk: ['Someone was busking “Wonderwall” again. Tez says it was a duet.', '{me} busking in the ticket hall. Honestly? Not bad.'],
   laundry: ['Ray from the launderette said {me} is “alright”. That’s his highest honour.'],
   trolley: ['SOMEONE GOT THE TROLLEY OUT OF THE POND. It’ll be back by Friday.'],
   nan: ['{me} has been helping Nan at the allotments. Doris is furious.'],
   passout: ['Saw someone asleep on the 436 at the end of the line. Been there.'],
-  promo: ['Heard {me} got promoted! Drinks are on them (they don’t know this yet).'],
+  promo: ['Heard {me} got promoted! Drinks are on {them} ({they} {doesnt} know this yet).'],
   strike: ['Tube strike. Walking. My trainers are not built for this.'],
-  sofa: ['Dave says his sofa guest is “basically family now”. The cat disagrees.'],
+  sofa: ['Dave says his sofa guest is “basically family now”. The cat disagrees.', '{me} has been on Dave’s sofa so long {theyre} basically a cushion. Dave says {they} {isnt} any trouble.'],
 };
 
 /** What NPCs say back when you post. */
@@ -203,9 +214,9 @@ const DM_KEYWORDS: { re: RegExp; lines: string[] }[] = [
 ];
 const READ_AND_IGNORED = ['Sorry was on the bus', 'Sorry just seen this', 'Sorry, phone died. Charger is at Dave’s.'];
 
-const MUM_LINES = ['Did you eat today. Mum x', 'Ring your Nan. Mum x', 'Are you wearing a coat. It said rain on the BBC. Mum x', 'Saw this and thought of you: [picture of a dog in a hat]. Mum x', 'Your cousin got a promotion. Just saying. Mum x', 'Are you coming home for Sunday dinner or are you too London now. Mum x'];
+const MUM_LINES = ['Did you eat today. Mum x', 'Ring your Nan. Mum x', 'Are you wearing a coat. It said rain on the BBC. Mum x', 'Saw this and thought of you: [picture of a dog in a hat]. Mum x', 'Your cousin got a promotion. Just saying. Mum x', 'Are you coming home for Sunday dinner or are you too London now. Mum x', 'Told Auntie Pat you’re doing ever so well. She asked if {theyre} courting yet. I said mind your own. Mum x'];
 const MUM_REPLIES = ['OK love. Mum x', 'Wear a coat. Mum x', 'Ring me later. Mum x', 'Lovely. Your dad says hello (he didn’t, he’s watching the snooker). Mum x', '👍 (Your sister showed me the thumbs up) Mum x'];
-const DAVE_LINES = ['The cat’s been sleeping in your spot again', 'Did you take my phone charger', 'Fancy a takeaway later? You’re paying though', 'Mate. The milk.'];
+const DAVE_LINES = ['The cat’s been sleeping in your spot again', 'Did you take my phone charger', 'Fancy a takeaway later? You’re paying though', 'Mate. The milk.', 'My mum asked if my old lodger’s eating properly. I said {theyre} a grown adult. She said “{is} {they} though?”'];
 const DAVE_REPLIES = ['Ha nice', 'Sound', 'Lol', 'Mate.', 'You owe me a milk'];
 
 interface Ctx {
@@ -250,7 +261,7 @@ export class NpcBrain {
     let a = this.avatars.get(name);
     if (!a) {
       // same name, same face, every session (and the same face as their walking sprite)
-      a = avatarForName(name);
+      a = npcAvatar(name);
       this.avatars.set(name, a);
     }
     return a;
@@ -289,7 +300,26 @@ export class NpcBrain {
     if (GOSSIP[key] && Math.random() < 0.75) this.gossipQ.push(key);
   }
 
+  /** Fill {me}/pronoun tokens with the player's name and chosen pronouns. */
+  aboutMe(text: string) {
+    return aboutPerson(text, this.save.avatar, this.save.name);
+  }
+  /** A line about another local, using that local's own pronouns. */
+  private aboutNeighbour(p: Persona): string | null {
+    const others = this.cast().filter((x) => x !== p && x.name !== 'Gary & dog');
+    if (!others.length) return null;
+    const n = pickOf(others);
+    return pronounText(pickOf(NEIGHBOUR_LINES), pronounsOf(this.avatarFor(n.name)), n.name);
+  }
+
   private compose(p: Persona, ctx: Ctx): string {
+    if (Math.random() < 0.12) {
+      const line = this.aboutNeighbour(p);
+      if (line && !this.recent.includes(line)) {
+        this.recent = [...this.recent.slice(-40), line];
+        return line;
+      }
+    }
     const ctxLines = CONTEXT.filter((c) => c.when(ctx)).flatMap((c) => c.lines);
     for (let tries = 0; tries < 6; tries++) {
       const r = Math.random();
@@ -310,7 +340,7 @@ export class NpcBrain {
       let text: string;
       if (this.gossipQ.length) {
         const key = this.gossipQ.shift()!;
-        text = pickOf(GOSSIP[key]).replace('{me}', this.save.name);
+        text = aboutPerson(pickOf(GOSSIP[key]), this.save.avatar, this.save.name);
       } else text = this.compose(p, ctx);
       if (/can.t complain/i.test(text) && this.tel) p = this.tel;
       const post = this.social.npcPost(this.author(p), text, { likes: Math.floor(rnd(0, 4)) });
@@ -324,8 +354,8 @@ export class NpcBrain {
       this.nextDM = t + rnd(150000, 300000);
       this.dmsSent++;
       const r = Math.random();
-      if (r < 0.18) this.social.incoming(contactAuthor('mum'), pickOf(MUM_LINES));
-      else if (r < 0.28 && this.save.home !== 'sofa') this.social.incoming(contactAuthor('dave'), pickOf(DAVE_LINES));
+      if (r < 0.18) this.social.incoming(contactAuthor('mum'), this.aboutMe(pickOf(MUM_LINES)));
+      else if (r < 0.28 && this.save.home !== 'sofa') this.social.incoming(contactAuthor('dave'), this.aboutMe(pickOf(DAVE_LINES)));
       else {
         const p = pickOf(this.cast());
         this.social.incoming(this.author(p), pickOf(p.openers));

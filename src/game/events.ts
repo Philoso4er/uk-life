@@ -1,5 +1,6 @@
 // Phase 2: British life happens to you. Random choice cards, the prepayment meter, damp,
 // careers (performance reviews + mid-shift dilemmas) and a Universal Credit-ish claim.
+import { aboutPerson } from './pronouns';
 import type { JobId, SaveState } from './types';
 import { HOMES, JOBS, LEVEL_XP, chance, completeGoal, dailyHooks, gainMoodlet, gainSkill, jobTitle, levelPay, money, tickHooks, weeklyHooks, type GameEvent, type Tone } from './economy';
 import { addMoodlet, applyFx, effectiveMood, removeMoodlet } from './needs';
@@ -183,7 +184,7 @@ export const EVENTS: EventDef[] = [
     cooldownDays: 2,
     when: (_s, t) => t.hh >= 9 && t.hh < 22,
     choices: [
-      { label: 'Pick up', note: 'Social ++. About 40 minutes.', apply: (s, out) => { applyFx(s, { social: 25, energy: -4 }); if (chance(0.5)) { gainMoodlet(s, 'mums_dinner', out); applyFx(s, { hunger: 30 }); return 'It was the Cornwall programme. Then she sent a Tupperware of shepherd’s pie round with your cousin. You are loved.'; } return 'Nobody died. Your cousin got engaged. The neighbour’s cat got a new hip. You said “aw” fourteen times.'; } },
+      { label: 'Pick up', note: 'Social ++. About 40 minutes.', apply: (s, out) => { applyFx(s, { social: 25, energy: -4 }); if (chance(0.5)) { gainMoodlet(s, 'mums_dinner', out); applyFx(s, { hunger: 30 }); return aboutPerson('It was the Cornwall programme. Then she sent a Tupperware of shepherd’s pie round with your cousin and told the family group chat {theyre} “doing ever so well in London”. You are loved.', s.avatar, s.name); } return 'Nobody died. Your cousin got engaged. The neighbour’s cat got a new hip. You said “aw” fourteen times.'; } },
       { label: 'Text “can’t talk, all OK x”', note: 'Free. Guilt.', apply: (s, out) => { applyFx(s, { mood: -4 }); out.push({ type: 'phone', from: 'Mum', text: 'OK love. Just wanted to hear your voice. Mum x', tone: 'info', quiet: true }); return { text: 'She replied “OK love. Just wanted to hear your voice. Mum x”. Devastating.', tone: 'bad' }; } },
     ],
   },
@@ -281,7 +282,7 @@ export const EVENTS: EventDef[] = [
     cooldownDays: 7,
     when: (s) => !!s.job,
     choices: [
-      { label: 'Put a fiver in', note: '£5. Social +', req: afford(5), apply: (s) => { pay(s, 5); applyFx(s, { social: 10 }); return 'You wrote “All the best! x” like you’ve known her for years. Brenda hugged you. You still don’t know who Brenda is.'; } },
+      { label: 'Put a fiver in', note: '£5. Social +', req: afford(5), apply: (s) => { pay(s, 5); applyFx(s, { social: 10 }); return aboutPerson('You wrote “All the best! x” like you’ve known her for years. Brenda hugged you and told the whole office “I like {them}, {theyre} lovely.” You still don’t know who Brenda is.', s.avatar, s.name); } },
       { label: 'Sign it and pass it on', note: 'Free. Slightly shifty.', apply: (s) => { applyFx(s, { social: -4 }); return 'You signed it and passed it on quickly. Someone counted the money. Someone always counts the money.'; } },
     ],
   },

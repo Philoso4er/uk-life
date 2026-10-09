@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { ACCESSORIES, ACC_LABEL, BEARDS, BEARD_LABEL, HAIRS, HAIR_COLOURS, HAIR_LABEL, OUTFITS, OUTFIT_COLOURS, OUTFIT_LABEL, SKINS, randomAvatar } from '../game/avatar';
+import { ACCESSORIES, ACC_LABEL, BEARDS, BEARD_LABEL, HAIRS, HAIR_COLOURS, HAIR_LABEL, OUTFITS, OUTFIT_COLOURS, OUTFIT_LABEL, SKINS, randomAvatar, withGender } from '../game/avatar';
+import { pronounsOf } from '../game/pronouns';
+import { IdentityRows } from './Identity';
 import type { Avatar } from '../game/types';
 import { AvatarCanvas } from './AvatarCanvas';
 import { MAX_NAME } from '../net/filter';
@@ -34,7 +36,7 @@ export function Creator({
         <div className="creator-body">
           <div className="creator-preview">
             <AvatarCanvas avatar={a} size={150} animate />
-            <button className="btn btn-ghost btn-small" onClick={() => setA(randomAvatar())}>
+            <button className="btn btn-ghost btn-small" onClick={() => setA((p) => ({ ...randomAvatar(Math.random, p.gender ?? 'other'), pronouns: pronounsOf(p) }))}>
               🎲 Randomise
             </button>
           </div>
@@ -52,6 +54,8 @@ export function Creator({
                 />
               </label>
             ) : null}
+            <IdentityRows gender={a.gender ?? 'other'} pronouns={pronounsOf(a)} onGender={(g) => setA((p) => withGender(p, g))} onPronouns={(pr) => set('pronouns', pr)} />
+            <p className="muted small creator-note">Every hairstyle, outfit and extra is open to everyone. Gender sets your build and some starting picks; pronouns are what locals use when they talk about you.</p>
             <Row label="Skin">
               {SKINS.map((c) => (
                 <Swatch key={c} colour={c} on={a.skin === c} onClick={() => set('skin', c)} />

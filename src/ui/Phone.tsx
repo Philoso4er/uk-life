@@ -11,6 +11,7 @@ import type { SaveState } from '../game/types';
 import { audioSettings, sfx } from '../game/audio';
 import { MAX_DM, MAX_POST } from '../net/filter';
 import { avatarUrl } from './avatarUrl';
+import { IdentityEditor } from './Identity';
 
 export type PhoneApp = 'home' | 'natter' | 'messages' | 'new' | 'work' | 'bank' | 'goals' | 'me' | 'settings' | 'shop' | 'stuff' | `thread:${string}`;
 
@@ -102,7 +103,7 @@ export function Phone({
           ) : app === 'goals' ? (
             <Goals snap={snap} />
           ) : app === 'me' ? (
-            <Me save={engine.save} snap={snap} />
+            <Me engine={engine} save={engine.save} snap={snap} />
           ) : app === 'shop' ? (
             <Shop engine={engine} onEvents={onEvents} toast={toast} />
           ) : app === 'stuff' ? (
@@ -635,7 +636,7 @@ function Goals({ snap }: { snap: Snapshot }) {
   );
 }
 
-function Me({ save, snap }: { save: SaveState; snap: Snapshot }) {
+function Me({ engine, save, snap }: { engine: Engine; save: SaveState; snap: Snapshot }) {
   const val: Record<string, number> = { energy: snap.energy, hunger: snap.hunger, social: snap.social, hygiene: snap.hygiene, warmth: snap.warmth };
   return (
     <div className="app-pad">
@@ -653,6 +654,8 @@ function Me({ save, snap }: { save: SaveState; snap: Snapshot }) {
           <b>{Math.round(snap.mood)}</b>
         </div>
       </div>
+      <div className="section-label">You</div>
+      <IdentityEditor engine={engine} />
       <div className="section-label">How you’re feeling</div>
       <ul className="moodlet-list">
         {snap.moodlets.length === 0 ? <li className="muted small">Nothing in particular. Very British.</li> : null}
@@ -713,6 +716,8 @@ function Settings({ engine, social, onQuit, onReset }: { engine: Engine; social:
         </span>
         <input type="checkbox" checked={social.allowDMs} onChange={(e) => engine.social.setAllowDMs(e.target.checked)} />
       </label>
+      <div className="section-label">Gender & pronouns</div>
+      <IdentityEditor engine={engine} />
       <div className="section-label">Muted ({social.muted.length})</div>
       {social.muted.length === 0 ? <p className="muted small">Nobody. You’re very tolerant.</p> : null}
       <ul className="thread-list">

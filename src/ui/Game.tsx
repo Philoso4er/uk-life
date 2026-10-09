@@ -233,6 +233,14 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     engine?.setIndoors(dialog?.kind === 'building' && dialog.b.kind !== 'spot');
   }, [engine, dialog]);
 
+  // older saves: a one-off nudge that gender & pronouns now exist (they start as Other, they/them)
+  useEffect(() => {
+    if (!engine || !engine.save.flags.identityPrompt) return;
+    delete engine.save.flags.identityPrompt;
+    const id = setTimeout(() => toast('New: set your gender & pronouns in 📱 Me (tap here). Locals use them when they gossip.', 'info', () => setPhone('me')), 2500);
+    return () => clearTimeout(id);
+  }, [engine, toast]);
+
   // keyboard shortcuts
   useEffect(() => {
     const k = (ev: KeyboardEvent) => {

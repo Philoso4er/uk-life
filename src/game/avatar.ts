@@ -1,4 +1,5 @@
-import type { Accessory, Avatar, Beard, Facing, HairStyle, OutfitStyle } from './types';
+import type { Accessory, Avatar, Beard, Facing, Gender, HairStyle, OutfitStyle } from './types';
+import { defaultPronouns, isGender, isPronouns } from './pronouns';
 import { BLINK, IDLE0, PHONE, WALK_FRAMES, avatarSeed, drawCharacter, type Dir } from './character';
 
 export const SKINS = ['#fbe0cc', '#f5d2b8', '#eabd98', '#d9a37a', '#c98e62', '#a86b45', '#8c5634', '#6e3f25', '#4f2f1c'];
@@ -60,21 +61,56 @@ export function hashString(s: string) {
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
   return h >>> 0;
 }
-export const randomAvatar = (r: () => number = Math.random): Avatar => {
-  const hair = pick(HAIRS, r);
-  const longHair = hair === 'long' || hair === 'ponytail' || hair === 'bun' || hair === 'braids';
+function wpick<T>(items: [T, number][], r: () => number): T {
+  let total = 0;
+  for (const [, w] of items) total += w;
+  let x = r() * total;
+  for (const [v, w] of items) {
+    x -= w;
+    if (x < 0) return v;
+  }
+  return items[items.length - 1][0];
+}
+// Likely (not exclusive!) styles per gender, used for random looks and NPCs. The creator allows anything.
+const HAIR_WEIGHTS: Record<Gender, [HairStyle, number][]> = {
+  male: [['short', 4], ['fade', 4], ['curly', 2], ['afro', 1.5], ['bald', 1.6], ['mohawk', 0.5], ['bun', 0.4], ['long', 0.3], ['braids', 0.4], ['ponytail', 0.2]],
+  female: [['long', 4], ['ponytail', 3], ['bun', 2.4], ['braids', 2], ['curly', 1.8], ['afro', 1.5], ['short', 0.8], ['fade', 0.3], ['mohawk', 0.2], ['bald', 0.1]],
+  other: [['short', 2], ['curly', 2], ['bun', 1.6], ['fade', 1.5], ['mohawk', 1.3], ['afro', 1.2], ['long', 1.1], ['braids', 0.9], ['ponytail', 0.8], ['bald', 0.5]],
+};
+const DRESS_WEIGHT: Record<Gender, number> = { male: 0, female: 1.6, other: 0.4 };
+/** Sensible starting points when you pick a gender in the creator (you can change any of them). */
+export const GENDER_DEFAULTS: Record<Gender, Pick<Avatar, 'hair' | 'beard'>> = {
+  male: { hair: 'short', beard: 'stubble' },
+  female: { hair: 'long', beard: 'none' },
+  other: { hair: 'curly', beard: 'none' },
+};
+/** Switch gender: sets pronouns to match, and moves the look to that gender's defaults. */
+export function withGender(a: Avatar, g: Gender): Avatar {
+  const out: Avatar = { ...a, gender: g, pronouns: defaultPronouns(g), ...GENDER_DEFAULTS[g] };
+  if (g === 'male' && a.outfit === 'dress') out.outfit = 'hoodie';
+  return out;
+}
+
+/** A random look. Gender is picked first (roughly 44% men, 44% women, 12% non-binary) unless given. */
+export const randomAvatar = (r: () => number = Math.random, g?: Gender): Avatar => {
+  const roll = r();
+  const gender: Gender = g ?? (roll < 0.44 ? 'male' : roll < 0.88 ? 'female' : 'other');
+  const hair = wpick(HAIR_WEIGHTS[gender], r);
+  const outfit = wpick<OutfitStyle>(OUTFITS.map((o) => [o, o === 'dress' ? DRESS_WEIGHT[gender] : 1]), r);
   return {
+    gender,
+    pronouns: defaultPronouns(gender),
     skin: pick(SKINS, r),
     hair,
     hairColor: r() < 0.85 ? pick(HAIR_COLOURS.slice(0, 6), r) : pick(HAIR_COLOURS, r),
-    outfit: pick(OUTFITS, r),
+    outfit,
     outfitColor: pick(OUTFIT_COLOURS, r),
     accessory: r() < 0.4 ? 'none' : pick(ACCESSORIES, r),
-    beard: longHair || r() < 0.62 ? 'none' : pick(BEARDS.slice(1), r),
+    beard: gender === 'male' && r() < 0.55 ? wpick<Beard>([['stubble', 3], ['beard', 2], ['tache', 1]], r) : 'none',
   };
 };
-/** The same name always gets the same face (bots, feed posts, DMs all agree). */
-export const avatarForName = (name: string): Avatar => randomAvatar(rng(hashString(name.toLowerCase())));
+/** The same name always gets the same face (bots, feed posts, DMs all agree). Pass a gender for named locals. */
+export const avatarForName = (name: string, g?: Gender): Avatar => randomAvatar(rng(hashString(name.toLowerCase())), g);
 
 export function sanitizeAvatar(a: unknown): Avatar {
   const o = (a ?? {}) as Partial<Avatar>;
@@ -87,6 +123,9 @@ export function sanitizeAvatar(a: unknown): Avatar {
     outfitColor: hex(o.outfitColor, OUTFIT_COLOURS[0]),
     accessory: ACCESSORIES.includes(o.accessory as Accessory) ? (o.accessory as Accessory) : 'none',
     beard: BEARDS.includes(o.beard as Beard) ? (o.beard as Beard) : 'none',
+    // older saves/clients have no gender: Other with they/them until the player says otherwise
+    gender: isGender(o.gender) ? o.gender : 'other',
+    pronouns: isPronouns(o.pronouns) ? o.pronouns : defaultPronouns(isGender(o.gender) ? o.gender : 'other'),
   };
 }
 
@@ -131,7 +170,7 @@ export function clearSpriteCache() {
 }
 export const spriteCacheSize = () => cells.size;
 
-const avKey = (a: Avatar) => `${a.skin}${a.hair}${a.hairColor}${a.outfit}${a.outfitColor}${a.accessory}${a.beard ?? 'none'}`;
+const avKey = (a: Avatar) => `${a.skin}${a.hair}${a.hairColor}${a.outfit}${a.outfitColor}${a.accessory}${a.beard ?? 'none'}${a.gender ?? 'other'}`;
 function makeCanvas(w: number, h: number): HTMLCanvasElement | OffscreenCanvas {
   if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
   const c = document.createElement('canvas');

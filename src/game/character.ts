@@ -2,7 +2,7 @@
 // (a map tile is 32px). A character is ~44px tall: a big readable head, a body with proper limbs,
 // and per-outfit detail. These drawings are expensive-ish, so the game bakes them into cached sprite
 // frames (see avatar.ts) and only ever blits images at runtime.
-import type { Avatar, HairStyle } from './types';
+import type { Avatar, Gender, HairStyle } from './types';
 
 export type Dir = 'down' | 'up' | 'side';
 /** 0-7 walk cycle, 8-11 idle breathing, 12 blink, 13 phone check */
@@ -58,15 +58,23 @@ interface Look {
   sole: string;
   eye: string;
   seed: number;
+  /** body build: broad and straight (male), narrower with a waist (female), in between (other) */
+  body: Gender;
+  /** shoulder half-width before outfit bulk */
+  sh: number;
 }
+const SHOULDER: Record<Gender, number> = { male: 8.5, female: 6.9, other: 7.5 };
 function lookOf(a: Avatar): Look {
   const seed = avatarSeed(a);
+  const body: Gender = a.gender === 'male' || a.gender === 'female' ? a.gender : 'other';
   const legs = a.outfit === 'suit' ? shade(a.outfitColor, -30) : a.outfit === 'tracksuit' ? a.outfitColor : a.outfit === 'football' ? (seed & 1 ? '#f2f2f2' : '#1d1f24') : LEGS[seed % LEGS.length];
   const legsHex = legs.startsWith('#') ? legs : '#2c3e66';
   const shoe = a.outfit === 'suit' ? '#1a1a1a' : a.outfit === 'mac' ? '#5a3a22' : SHOES[(seed >>> 3) % SHOES.length];
   return {
     a,
     seed,
+    body,
+    sh: SHOULDER[body],
     skin: a.skin,
     skinShade: shade(a.skin, -32),
     skinLight: shade(a.skin, 22),
@@ -188,6 +196,9 @@ export function drawCharacter(ctx: C, a: Avatar, dir: Dir, frame: number) {
 }
 
 // ---- front / back
+const torsoHalf = (L: Look) => L.sh * (L.a.outfit === 'puffer' ? 1.16 : L.a.outfit === 'mac' ? 1.05 : 1);
+const armW = (L: Look) => (L.body === 'male' ? 4.4 : L.body === 'female' ? 3.6 : 3.9) + (L.a.outfit === 'puffer' ? 0.7 : 0);
+
 function drawFrontBack(ctx: C, L: Look, P: Pose, back: boolean) {
   const a = L.a;
   const o = a.outfit;
@@ -198,14 +209,15 @@ function drawFrontBack(ctx: C, L: Look, P: Pose, back: boolean) {
   ctx.restore();
 
   // legs
-  const legW = o === 'football' ? 4.2 : 4.6;
+  const legW = (o === 'football' ? 4.2 : 4.6) + (L.body === 'male' ? 0.5 : L.body === 'female' ? -0.3 : 0);
+  const legX = L.body === 'male' ? 3.3 : L.body === 'female' ? 2.8 : 3;
   const legs = (side: -1 | 1, lift: number) => {
-    const x = side * 3;
+    const x = side * legX;
     const foot = -1.9 - lift;
     const knee = -6.5 - lift * 0.4 + P.bob * 0.5;
     if (o === 'dress' || o === 'football') {
       // bare legs (tights for the dress) + socks for football
-      limb2(ctx, [x, -11 + P.bob], [x, knee], [x, foot], 3.5, o === 'dress' ? (L.seed & 2 ? '#2a2a33' : L.skin) : L.skin);
+      limb2(ctx, [x, -11 + P.bob], [x, knee], [x, foot], L.body === 'male' ? 4 : 3.5, o === 'dress' ? (L.seed & 2 ? '#2a2a33' : L.skin) : L.skin);
       if (o === 'football') {
         limb(ctx, x, knee + 0.8, x, foot, 3.9, L.top);
         limb(ctx, x - 1.4, knee + 1.5, x + 1.4, knee + 1.5, 1.1, '#ffffff');
@@ -233,19 +245,21 @@ function drawFrontBack(ctx: C, L: Look, P: Pose, back: boolean) {
   // arms
   const sleeve = o === 'dress' ? L.skin : o === 'football' ? L.top : o === 'hivis' ? '#3b4250' : L.top;
   const sleeveDark = o === 'dress' ? L.skinShade : o === 'hivis' ? '#2b313c' : L.topDark;
+  const tw = torsoHalf(L);
+  const aw = armW(L);
   const arm = (side: -1 | 1, s: number) => {
-    const sx = side * (o === 'puffer' ? 8.4 : 7.2);
-    const hx = side * (o === 'puffer' ? 9.6 : 8.6);
+    const sx = side * (tw - 0.2);
+    const hx = side * (tw + 1.2);
     const hy = -12.6 + s * 1.3;
     const ey = -17 + s * 0.7;
-    limb2(ctx, [sx, -20.6], [hx - side * 0.2, ey], [hx, hy - 1.3], o === 'puffer' ? 4.6 : 3.9, side < 0 ? sleeve : sleeveDark);
+    limb2(ctx, [sx, -20.6], [hx - side * 0.2, ey], [hx, hy - 1.3], aw, side < 0 ? sleeve : sleeveDark);
     if (o === 'football' || o === 'dress') limb(ctx, hx - side * 0.1, ey + 1.2, hx, hy - 1.3, 3.2, side < 0 ? L.skin : L.skinShade);
     ell(ctx, hx, hy, 1.9, 2, side < 0 ? L.skin : L.skinShade);
   };
   if (P.phone && !back) {
     // both hands up holding a phone
-    limb2(ctx, [-7.2, -20.6], [-7.6, -15.5], [-1.6, -16.4], 3.9, sleeve);
-    limb2(ctx, [7.2, -20.6], [7.6, -15.5], [1.6, -16.4], 3.9, sleeveDark);
+    limb2(ctx, [-(tw - 0.2), -20.6], [-(tw + 0.2), -15.5], [-1.6, -16.4], aw, sleeve);
+    limb2(ctx, [tw - 0.2, -20.6], [tw + 0.2, -15.5], [1.6, -16.4], aw, sleeveDark);
     rrect(ctx, -2.6, -19.6, 5.2, 4.4, 0.9, '#22252c');
     rrect(ctx, -2.1, -19.2, 4.2, 3.4, 0.5, '#7fd3ff');
     ell(ctx, -2.2, -16.2, 1.8, 1.8, L.skin);
@@ -264,19 +278,25 @@ function drawFrontBack(ctx: C, L: Look, P: Pose, back: boolean) {
 
 function torsoFrontBack(ctx: C, L: Look, P: Pose, back: boolean) {
   const o = L.a.outfit;
-  const wide = o === 'puffer' ? 1.18 : o === 'mac' ? 1.05 : 1;
+  const wide = o === 'puffer' ? 1.16 : o === 'mac' ? 1.05 : 1;
   const bottom = o === 'mac' ? -6.2 : o === 'dress' ? -6.8 : o === 'knit' ? -10.6 : -11.2;
-  const w = 7.4 * wide;
-  const b = (o === 'dress' ? 9.4 : o === 'mac' ? 8.4 : 6.8 * wide) + P.breath * 0.12;
-  // neck
-  rrect(ctx, -2.2, -25.4, 4.4, 3.6, 1.2, L.skinShade);
+  const w = torsoHalf(L);
+  const hip = L.body === 'male' ? 7.1 : L.body === 'female' ? 7.2 : 6.9;
+  const b = (o === 'dress' ? 9.4 : o === 'mac' ? 8.4 : hip * wide) + P.breath * 0.12;
+  // a waist for female builds (puffers hide it), a straight V for male ones
+  const waist = L.body === 'female' && o !== 'puffer' ? 0.8 : L.body === 'other' && o !== 'puffer' ? 0.93 : 1;
+  // neck: thicker for male builds
+  const nw = L.body === 'male' ? 2.8 : L.body === 'female' ? 2 : 2.3;
+  rrect(ctx, -nw, -25.4, nw * 2, 3.6, 1.2, L.skinShade);
   ctx.beginPath();
   ctx.moveTo(-w, -19.8);
   ctx.quadraticCurveTo(-w, -23.4, -w + 3.2, -23.4);
   ctx.lineTo(w - 3.2, -23.4);
   ctx.quadraticCurveTo(w, -23.4, w, -19.8);
-  ctx.lineTo(b, bottom);
+  if (waist < 1) ctx.quadraticCurveTo(w * waist, -15.2, b, bottom);
+  else ctx.lineTo(b, bottom);
   ctx.quadraticCurveTo(0, bottom + 0.9, -b, bottom);
+  if (waist < 1) ctx.quadraticCurveTo(-w * waist, -15.2, -w, -19.8);
   ctx.closePath();
   ctx.fillStyle = hgrad(ctx, -w, w, L.topLight, L.top, L.topDark);
   ctx.fill();
@@ -459,6 +479,14 @@ function headFrontBack(ctx: C, L: Look, P: Pose, back: boolean) {
   g.addColorStop(0.55, L.skin);
   g.addColorStop(1, L.skinShade);
   ell(ctx, 0, y, HR, HRY, g);
+  // a squarer jaw for male faces, a slightly squarer one for androgynous ones
+  if (L.body !== 'female') {
+    const jw = L.body === 'male' ? HR - 0.9 : HR - 1.6;
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.roundRect(-jw, y - 1, jw * 2, HRY + (L.body === 'male' ? 0.9 : 0.6), [0, 0, L.body === 'male' ? 3.4 : 4.4, L.body === 'male' ? 3.4 : 4.4]);
+    ctx.fill();
+  }
   // chin shadow onto neck
   ctx.fillStyle = 'rgba(0,0,0,0.12)';
   ctx.beginPath();
@@ -472,33 +500,49 @@ function headFrontBack(ctx: C, L: Look, P: Pose, back: boolean) {
 function face(ctx: C, L: Look, P: Pose) {
   const y = HEAD_Y + 0.6;
   const look = P.phone ? 1.1 : 0;
-  // eyes
+  const male = L.body === 'male';
+  const fem = L.body === 'female';
+  // eyes: smaller and narrower on male faces, lashes on female ones
+  const erx = male ? 1.7 : 1.95;
+  const ery = male ? 1.95 : 2.35;
   for (const s of [-1, 1]) {
-    const ex = s * 3.2;
+    const ex = s * (male ? 3.3 : 3.2);
     if (P.blink) {
       limb(ctx, ex - 1.6, y + 0.3, ex + 1.6, y + 0.3, 0.8, '#3a2a22');
       continue;
     }
-    ell(ctx, ex, y, 1.95, 2.35, '#ffffff');
-    ell(ctx, ex + 0.15, y + 0.25 + look, 1.4, 1.55, L.eye);
-    ell(ctx, ex + 0.15, y + 0.35 + look, 0.7, 0.8, '#0d0b0a');
-    ell(ctx, ex - 0.35, y - 0.45 + look * 0.7, 0.5, 0.5, '#ffffff');
+    ell(ctx, ex, y, erx, ery, '#ffffff');
+    ell(ctx, ex + 0.15, y + 0.25 + look, male ? 1.25 : 1.4, male ? 1.4 : 1.55, L.eye);
+    ell(ctx, ex + 0.15, y + 0.35 + look, male ? 0.62 : 0.7, male ? 0.7 : 0.8, '#0d0b0a');
+    ell(ctx, ex - 0.35, y - 0.45 + look * 0.7, male ? 0.42 : 0.5, male ? 0.42 : 0.5, '#ffffff');
     // upper lid line
-    ctx.strokeStyle = 'rgba(40,25,20,0.75)';
-    ctx.lineWidth = 0.55;
+    ctx.strokeStyle = fem ? 'rgba(30,18,14,0.95)' : 'rgba(40,25,20,0.75)';
+    ctx.lineWidth = fem ? 0.8 : 0.55;
     ctx.beginPath();
-    ctx.ellipse(ex, y, 2, 2.4, 0, Math.PI * 1.08, Math.PI * 1.92);
+    ctx.ellipse(ex, y, erx + 0.05, ery + 0.05, 0, Math.PI * 1.08, Math.PI * 1.92);
     ctx.stroke();
+    if (fem) {
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(ex + s * 1.7, y - 1.3);
+      ctx.lineTo(ex + s * 2.6, y - 2.1);
+      ctx.stroke();
+    }
   }
-  // brows
+  // brows: heavy and straight (male), fine and arched (female)
   const browCol = L.a.hair === 'bald' ? L.skinShade : L.hairDark;
   for (const s of [-1, 1]) {
     ctx.strokeStyle = browCol;
-    ctx.lineWidth = 0.95;
+    ctx.lineWidth = male ? 1.45 : fem ? 0.75 : 1.05;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(s * 1.6, y - 3.3);
-    ctx.quadraticCurveTo(s * 3.1, y - 4.2, s * 4.7, y - 3.3);
+    if (male) {
+      ctx.moveTo(s * 1.4, y - 2.9);
+      ctx.quadraticCurveTo(s * 3.1, y - 3.5, s * 4.8, y - 3.1);
+    } else {
+      ctx.moveTo(s * 1.6, y - 3.3);
+      ctx.quadraticCurveTo(s * 3.1, y - (fem ? 4.5 : 4.1), s * 4.7, y - 3.3);
+    }
     ctx.stroke();
   }
   // nose
@@ -508,9 +552,12 @@ function face(ctx: C, L: Look, P: Pose) {
   ctx.moveTo(-0.6, y + 2.6);
   ctx.quadraticCurveTo(0, y + 3.3, 0.7, y + 2.6);
   ctx.stroke();
-  // cheeks
-  ell(ctx, -5, y + 3.1, 1.6, 1, 'rgba(232,110,110,0.28)');
-  ell(ctx, 5, y + 3.1, 1.6, 1, 'rgba(232,110,110,0.28)');
+  // cheeks: blush on female faces, a hint on androgynous ones, none on male ones
+  if (!male) {
+    const blush = fem ? 'rgba(232,110,110,0.3)' : 'rgba(232,110,110,0.14)';
+    ell(ctx, -5, y + 3.1, 1.6, 1, blush);
+    ell(ctx, 5, y + 3.1, 1.6, 1, blush);
+  }
   // beard / mouth
   const beard = L.a.beard ?? 'none';
   if (beard === 'beard') {
@@ -524,24 +571,34 @@ function face(ctx: C, L: Look, P: Pose) {
     ctx.closePath();
     ctx.fill();
   } else if (beard === 'stubble') {
-    ctx.fillStyle = 'rgba(40,30,25,0.22)';
+    // a visible shadow along the jaw and upper lip
+    ctx.fillStyle = mix(L.a.hairColor, L.skin, 0.45);
+    ctx.globalAlpha = 0.6;
     ctx.beginPath();
-    ctx.ellipse(0, y + 5, 5.4, 3.2, 0, 0, Math.PI);
+    ctx.moveTo(-HR + 1.2, y + 1.2);
+    ctx.quadraticCurveTo(-HR + 1.4, y + 7.6, 0, y + 7.9);
+    ctx.quadraticCurveTo(HR - 1.4, y + 7.6, HR - 1.2, y + 1.2);
+    ctx.quadraticCurveTo(HR - 3.2, y + 4.8, 2.2, y + 3.4);
+    ctx.quadraticCurveTo(0, y + 2.9, -2.2, y + 3.4);
+    ctx.quadraticCurveTo(-HR + 3.2, y + 4.8, -HR + 1.2, y + 1.2);
     ctx.fill();
+    ctx.globalAlpha = 1;
   }
-  // mouth: a small friendly smile
-  ctx.strokeStyle = beard === 'beard' ? '#f2e6e0' : '#7a2e2e';
+  // mouth: a small friendly smile (fuller lips on female faces, flatter on male ones)
+  ctx.strokeStyle = beard === 'beard' ? '#f2e6e0' : fem ? '#b23f55' : male ? '#6b3a33' : '#7a2e2e';
   ctx.lineWidth = 0.85;
   ctx.beginPath();
   ctx.moveTo(-1.7, y + 4.6);
-  ctx.quadraticCurveTo(0, y + 5.9, 1.7, y + 4.6);
+  ctx.quadraticCurveTo(0, y + (male ? 5.4 : 5.9), 1.7, y + 4.6);
   ctx.stroke();
+  if (fem && beard !== 'beard') ell(ctx, 0, y + 5.55, 1.05, 0.42, 'rgba(190,70,90,0.5)');
   if (beard === 'tache') {
-    ctx.fillStyle = L.hair;
+    ctx.fillStyle = L.hairDark;
     ctx.beginPath();
-    ctx.moveTo(-2.9, y + 4.4);
-    ctx.quadraticCurveTo(0, y + 2.6, 2.9, y + 4.4);
-    ctx.quadraticCurveTo(0, y + 3.8, -2.9, y + 4.4);
+    ctx.moveTo(-3.3, y + 4.7);
+    ctx.quadraticCurveTo(-1.6, y + 2.3, 0, y + 3.2);
+    ctx.quadraticCurveTo(1.6, y + 2.3, 3.3, y + 4.7);
+    ctx.quadraticCurveTo(0, y + 3.9, -3.3, y + 4.7);
     ctx.fill();
   }
 }
@@ -568,7 +625,7 @@ function drawSide(ctx: C, L: Look, P: Pose) {
   hairBehind(ctx, L, 'side');
   const drawLeg = (l: ReturnType<typeof leg>, col: string, skinCol: string) => {
     const bare = o === 'dress' || o === 'football';
-    limb2(ctx, [0, hipY], [l.kx, l.ky], [l.fx, l.fy], bare ? 3.5 : 4.6, bare ? (o === 'dress' && L.seed & 2 ? '#2a2a33' : skinCol) : col);
+    limb2(ctx, [0, hipY], [l.kx, l.ky], [l.fx, l.fy], (bare ? 3.5 : 4.6) + (L.body === 'male' ? 0.5 : L.body === 'female' ? -0.3 : 0), bare ? (o === 'dress' && L.seed & 2 ? '#2a2a33' : skinCol) : col);
     if (o === 'football') limb(ctx, l.kx + (l.fx - l.kx) * 0.15, l.ky + (l.fy - l.ky) * 0.15, l.fx, l.fy, 3.9, L.top);
     // shoe pointing forward
     rrect(ctx, l.fx - 2.2, l.fy - 1.4, 5.8, 3, 1.4, L.shoe);
@@ -584,7 +641,7 @@ function drawSide(ctx: C, L: Look, P: Pose) {
     const ey = sy + Math.cos(ang) * 5;
     const hx = ex + Math.sin(ang * 1.4 + 0.2) * 4.4;
     const hy = ey + Math.cos(ang * 1.4 + 0.2) * 4.4;
-    limb2(ctx, [sx, sy], [ex, ey], [hx, hy], o === 'puffer' ? 4.6 : 3.9, col);
+    limb2(ctx, [sx, sy], [ex, ey], [hx, hy], armW(L), col);
     if (o === 'dress' || o === 'football') limb(ctx, ex, ey, hx, hy, 3.2, hand);
     ell(ctx, hx + 0.2, hy + 1, 1.9, 1.9, hand);
   };
@@ -594,11 +651,11 @@ function drawSide(ctx: C, L: Look, P: Pose) {
   if (o === 'football') rrect(ctx, -3.8, -13.4, 7.6, 5, 1.6, L.legs);
   ctx.translate(0, P.bob * (P.nearThigh === 0 ? 0 : 0));
   // torso
-  const wide = o === 'puffer' ? 1.2 : 1;
+  const wide = (o === 'puffer' ? 1.2 : 1) * (L.body === 'male' ? 1.1 : L.body === 'female' ? 0.94 : 1);
   const back = -4.4 * wide;
   const front = 4.2 * wide;
   const bottom = o === 'mac' ? -6.2 : o === 'dress' ? -6.8 : -11.2;
-  rrect(ctx, -1.6, -25.4, 3.8, 3.6, 1.2, L.skinShade);
+  rrect(ctx, L.body === 'male' ? -2 : -1.6, -25.4, L.body === 'male' ? 4.6 : 3.8, 3.6, 1.2, L.skinShade);
   ctx.beginPath();
   ctx.moveTo(back, -19.6);
   ctx.quadraticCurveTo(back, -23.4, back + 2.6, -23.4);
@@ -674,7 +731,7 @@ function drawSide(ctx: C, L: Look, P: Pose) {
   }
   // near arm (in front)
   if (P.phone) {
-    limb2(ctx, [0.4, -20.8], [1.2, -15.8], [5.6, -17.6], o === 'puffer' ? 4.6 : 3.9, sleeve);
+    limb2(ctx, [0.4, -20.8], [1.2, -15.8], [5.6, -17.6], armW(L), sleeve);
     rrect(ctx, 5.2, -21.4, 2.2, 4.6, 0.6, '#22252c');
     ell(ctx, 5.8, -17.2, 1.9, 1.9, L.skin);
   } else arm(P.nearArm, sleeve, L.skin);
@@ -691,6 +748,13 @@ function headSide(ctx: C, L: Look, P: Pose) {
   g.addColorStop(0.55, L.skin);
   g.addColorStop(1, L.skinShade);
   ell(ctx, cx, y, HR - 0.4, HRY, g);
+  if (L.body !== 'female') {
+    // jaw line
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.roundRect(cx - 2.4, y - 1, HR + 1.2, HRY + (L.body === 'male' ? 0.9 : 0.5), [0, 0, 3.2, 1.6]);
+    ctx.fill();
+  }
   // nose
   ell(ctx, cx + HR - 0.6, y + 1.6, 1.5, 1.3, L.skin);
   // ear
@@ -705,15 +769,16 @@ function headSide(ctx: C, L: Look, P: Pose) {
     ell(ctx, ex + 0.5, ey + 0.2 + (P.phone ? 1 : 0), 1.05, 1.45, L.eye);
     ell(ctx, ex + 0.6, ey + 0.3 + (P.phone ? 1 : 0), 0.55, 0.75, '#0d0b0a');
     ell(ctx, ex + 0.2, ey - 0.5, 0.4, 0.4, '#ffffff');
+    if (L.body === 'female') limb(ctx, ex + 1.2, ey - 1.5, ex + 2.1, ey - 2.3, 0.6, 'rgba(30,18,14,0.95)');
   }
   ctx.strokeStyle = L.a.hair === 'bald' ? L.skinShade : L.hairDark;
-  ctx.lineWidth = 0.95;
+  ctx.lineWidth = L.body === 'male' ? 1.4 : L.body === 'female' ? 0.75 : 1.05;
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(ex - 1.6, ey - 3.1);
-  ctx.quadraticCurveTo(ex, ey - 3.9, ex + 1.8, ey - 3.2);
+  ctx.quadraticCurveTo(ex, ey - (L.body === 'male' ? 3.4 : 3.9), ex + 1.8, ey - 3.2);
   ctx.stroke();
-  ell(ctx, cx + 5.4, y + 3.6, 1.4, 0.9, 'rgba(232,110,110,0.28)');
+  if (L.body !== 'male') ell(ctx, cx + 5.4, y + 3.6, 1.4, 0.9, L.body === 'female' ? 'rgba(232,110,110,0.3)' : 'rgba(232,110,110,0.14)');
   const beard = L.a.beard ?? 'none';
   if (beard === 'beard') {
     ctx.fillStyle = L.hair;
@@ -724,17 +789,21 @@ function headSide(ctx: C, L: Look, P: Pose) {
     ctx.lineTo(cx + 4, y + 4.6);
     ctx.closePath();
     ctx.fill();
-  } else if (beard === 'stubble') ell(ctx, cx + 3.4, y + 5.2, 4, 2.4, 'rgba(40,30,25,0.22)');
-  ctx.strokeStyle = beard === 'beard' ? '#f2e6e0' : '#7a2e2e';
+  } else if (beard === 'stubble') {
+    ctx.globalAlpha = 0.6;
+    ell(ctx, cx + 3.6, y + 5.4, 4.4, 2.8, mix(L.a.hairColor, L.skin, 0.45));
+    ctx.globalAlpha = 1;
+  }
+  ctx.strokeStyle = beard === 'beard' ? '#f2e6e0' : L.body === 'female' ? '#b23f55' : L.body === 'male' ? '#6b3a33' : '#7a2e2e';
   ctx.lineWidth = 0.8;
   ctx.beginPath();
   ctx.moveTo(cx + 5.6, y + 5.1);
   ctx.quadraticCurveTo(cx + 6.6, y + 5.6, cx + 7.3, y + 4.9);
   ctx.stroke();
   if (beard === 'tache') {
-    ctx.fillStyle = L.hair;
+    ctx.fillStyle = L.hairDark;
     ctx.beginPath();
-    ctx.ellipse(cx + 6.2, y + 4.3, 1.8, 0.8, -0.2, 0, Math.PI * 2);
+    ctx.ellipse(cx + 6.2, y + 4.3, 2.2, 1.05, -0.2, 0, Math.PI * 2);
     ctx.fill();
   }
   hairTop(ctx, L, 'side');
@@ -755,6 +824,15 @@ function hairBehind(ctx: C, L: Look, v: View) {
     afroBall(ctx, L, v === 'side' ? -0.6 : 0, y - 2.4, 12.2);
   } else if (h === 'curly' && v !== 'back') {
     for (const [x, yy, r] of [[-8, 0, 3.6], [8, 0, 3.6], [-7.2, 4, 3], [7.2, 4, 3]] as const) ell(ctx, (v === 'side' ? x * 0.4 - 2 : x), y + yy, r, r, L.hairDark);
+  } else if (h === 'ponytail' && v === 'front') {
+    // the tail swings out past the shoulder
+    ctx.fillStyle = L.hairDark;
+    ctx.beginPath();
+    ctx.moveTo(HR - 2, y - 4);
+    ctx.quadraticCurveTo(HR + 5.4, y - 1, HR + 2.6, y + 9.4);
+    ctx.quadraticCurveTo(HR + 0.6, y + 3, HR - 2.6, y + 0.6);
+    ctx.closePath();
+    ctx.fill();
   } else if (longish(h)) {
     if (v === 'front') {
       rrect(ctx, -HR - 1.3, y - 3, (HR + 1.3) * 2, 15.4, 4.5, L.hairDark);
@@ -946,6 +1024,12 @@ function hairTop(ctx: C, L: Look, v: View) {
     ctx.fillStyle = mix(L.a.hairColor, L.skin, 0.55);
     ctx.fillRect(-HR - 0.3, y - 2.6, 2, 2.6);
     ctx.fillRect(HR - 1.7, y - 2.6, 2, 2.6);
+  }
+  // sideburns on male faces with short hair
+  if (L.body === 'male' && (h === 'short' || h === 'fade' || h === 'curly')) {
+    ctx.fillStyle = h === 'fade' ? mix(L.a.hairColor, L.skin, 0.4) : L.hairDark;
+    ctx.fillRect(-HR + 0.1, y - 1.6, 1.5, 4.2);
+    ctx.fillRect(HR - 1.6, y - 1.6, 1.5, 4.2);
   }
   if (h === 'curly') {
     for (let i = 0; i < 7; i++) ell(ctx, -6.6 + i * 2.2, y - 4.6 - (i % 2) * 1.2, 2.1, 2.1, i % 2 ? hair : L.hairDark);

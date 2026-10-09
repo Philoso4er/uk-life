@@ -197,6 +197,8 @@ function fillDefaults<T>(def: T, raw: unknown): T {
 /** Turn whatever is in localStorage into a valid current save (or null). Handles v1 saves. */
 export function migrate(raw: unknown): SaveState | null {
   if (!isObj(raw) || typeof raw.name !== 'string' || !isObj(raw.avatar)) return null;
+  // saves from before gender/pronouns existed: Other + they/them (we never guess from a name), plus a one-off nudge
+  const hadGender = 'gender' in (raw.avatar as object);
   const base = newSave(raw.name, raw.avatar as unknown as Avatar);
   if (raw.version === 1) {
     // v1 ran a 3-minute fake day; v2 runs on real UK time. Keep money, job, home and progress.
@@ -234,6 +236,7 @@ export function migrate(raw: unknown): SaveState | null {
   if (!hadGuide) delete s.flags.guide;
   // avatars from older versions get the new fields (beard) and lose anything unknown
   s.avatar = sanitizeAvatar(s.avatar);
+  if (!hadGender) s.flags.identityPrompt = true;
   if (!(s.home in HOMES)) s.home = 'sofa';
   if (s.job && !(s.job in JOBS)) s.job = null;
   s.jobLevel = Math.max(1, Math.min(5, Math.round(s.jobLevel)));

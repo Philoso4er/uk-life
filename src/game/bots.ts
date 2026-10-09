@@ -1,10 +1,34 @@
 import { avatarForName, randomAvatar } from './avatar';
 import { findPath } from './pathfind';
 import { ROADS, gapClear, hitsAnyVehicle, roadAt, type Car } from './traffic';
-import type { Avatar, Facing } from './types';
+import type { Avatar, Facing, Gender } from './types';
 import { H, NPC_SPOTS, T, W, isSolid, tiles } from './world';
 
 export const BOT_NAMES = ['Big Tel', 'Auntie Bev', 'Tomasz', 'Priya', 'Gary & dog', 'Josh (Fleecems)', 'Nan', 'Kev', 'Siobhan', 'Femi', 'Hamza', 'Posh Rupert'];
+/** Each local's gender (and so their pronouns and build). Their look is still seeded by name. */
+export const NPC_GENDER: Record<string, Gender> = {
+  'Big Tel': 'male',
+  'Auntie Bev': 'female',
+  Tomasz: 'male',
+  Priya: 'female',
+  'Gary & dog': 'male',
+  'Josh (Fleecems)': 'male',
+  Nan: 'female',
+  Kev: 'male',
+  Siobhan: 'female',
+  Femi: 'other',
+  Hamza: 'other',
+  'Posh Rupert': 'male',
+};
+/** A few locals whose look is part of the joke (Nan is grey, Rupert owns three Barbours, Femi is never without cans). */
+const NPC_LOOK: Record<string, Partial<Avatar>> = {
+  Nan: { hair: 'bun', hairColor: '#9aa0a6', outfit: 'knit', accessory: 'glasses' },
+  'Posh Rupert': { outfit: 'mac', outfitColor: '#3f5a3a', accessory: 'flatcap' },
+  Femi: { accessory: 'headphones' },
+  'Big Tel': { hair: 'bald', outfit: 'football', beard: 'stubble' },
+};
+/** A named local's look: seeded by their name (stable forever), built for their gender. */
+export const npcAvatar = (name: string): Avatar => ({ ...avatarForName(name, NPC_GENDER[name]), ...NPC_LOOK[name] });
 
 export const BOT_LINES = [
   'Is it me or has it rained every day since 2009',
@@ -85,7 +109,7 @@ export function makeBots(n: number, exclude: string[] = []): Bot[] {
     .slice(0, n);
   return names.map((name, i) => {
     const s = NPC_SPOTS[(i * 5) % NPC_SPOTS.length];
-    return freshBot('npc-' + i, name, avatarForName(name), s.x, s.y, 1.6 + Math.random() * 1.1);
+    return freshBot('npc-' + i, name, npcAvatar(name), s.x, s.y, 1.6 + Math.random() * 1.1);
   });
 }
 

@@ -2497,3 +2497,27 @@ kbd {
 .guide-skip {
   flex: none;
 }
+
+/* gender & pronouns */
+.gender-items .chip-big {
+  min-width: 84px;
+  padding: 9px 16px;
+  font-size: 0.95rem;
+  text-align: center;
+}
+.creator-note {
+  margin: -2px 0 10px;
+  line-height: 1.35;
+}
+.identity-box {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  padding: 10px 12px 4px;
+  margin-bottom: 12px;
+}
+.identity-box .opt-row {
+  margin-bottom: 8px;
+}
+.identity-box p {
+  margin: 4px 0 8px;
+}
