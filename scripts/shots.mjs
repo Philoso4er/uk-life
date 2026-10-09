@@ -45,7 +45,11 @@ async function tour(label, viewport, mobile) {
   const enter = async (x, y, re) => {
     await dbg(([x, y]) => { const e = window.__ukl.engine; e.teleport(x, y); e.touch(); }, [x, y]);
     await w(450);
-    await btn(re).click();
+    // round 6: most doors now say "🚪 Go in X" and walk you inside; open the full menu from in there
+    const src = re.source.replace(/^Enter /, '(?:Enter|Go in) ');
+    await btn(new RegExp(src)).click();
+    await w(900);
+    await dbg(() => { const u = window.__ukl; if (u.engine.inside && u.engine.scene) u.setDialog({ kind: 'building', b: u.engine.inside }); });
     await w(450);
   };
 
@@ -201,10 +205,8 @@ async function tour(label, viewport, mobile) {
 
   // ---- rain + night + delivery
   await setLondon(2, 22, 0);
-  await dbg(() => { const e = window.__ukl.engine; e.setRain(true); e.save.job = 'rider'; e.save.lastShiftAt = 0; e.save.energy = 80; e.teleport(4.5, 23.4); e.touch(); });
-  await w(300);
-  await btn(/Enter PFC/).click();
-  await w(300);
+  await dbg(() => { const e = window.__ukl.engine; e.setRain(true); e.save.job = 'rider'; e.save.lastShiftAt = 0; e.save.energy = 80; e.touch(); });
+  await enter(4.5, 23.4, /Enter PFC/);
   await btn('Start shift').click();
   await w(600);
   await dbg(() => window.__ukl.engine.setRain(true));

@@ -13,19 +13,19 @@ export const GUIDE_STEPS: GuideStep[] = [
   {
     goal: 'sausage',
     title: 'Breakfast of champions',
-    text: () => 'Tap Crumbs & Co. (the blue bakery) to walk there, then grab a sausage roll.',
+    text: () => 'Tap Crumbs & Co. (the blue bakery) to walk in, then tap the counter for a sausage roll.',
     place: () => 'crumbs',
   },
   {
     goal: 'job',
     title: 'Get a job',
-    text: () => 'Head to Jobcentre Minus and pick something from the Jobs tab. Shut? The kiosk outside still works.',
+    text: () => 'Head into Jobcentre Minus and tap the job board 📋. Shut? The kiosk outside still works.',
     place: () => 'jobcentre',
   },
   {
     goal: 'shift',
     title: 'Clock in',
-    text: (s) => (s.job ? `Go to ${JOBS[s.job].employer} and start your first shift. Shifts run at set hours; the place will tell you.` : 'You’ll need a job first.'),
+    text: (s) => (s.job ? `Go to ${JOBS[s.job].employer} and start your first shift (staff room / desk inside). Shifts run at set hours; the place will tell you.` : 'You’ll need a job first.'),
     place: (s) => (s.job ? JOBS[s.job].building : 'jobcentre'),
   },
 ];

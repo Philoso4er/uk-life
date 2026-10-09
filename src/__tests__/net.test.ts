@@ -47,8 +47,8 @@ describe('LocalTransport (BroadcastChannel) — stand-in for the Supabase realti
     b.sendSocial({ t: 'dm', id: 'm2', from: 'bob.1', name: 'Bob', to: 'alice.1', text: 'Pint later?', ts: Date.now() });
     b.sendSocial({ t: 'post', id: 'm3', from: 'bob.1', name: 'Bob', text: 'oi fuck off', ts: 9e15 });
     await wait(50);
-    expect(chatsA.map((m) => (m.t !== 'like' ? m.text : ''))).toEqual(['Alright? Bloody freezing', 'Pint later?', 'oi **** off']);
-    expect(chatsA.every((m) => m.t === 'like' || m.ts <= Date.now())).toBe(true);
+    expect(chatsA.map((m) => (m.t === 'post' || m.t === 'dm' ? m.text : ''))).toEqual(['Alright? Bloody freezing', 'Pint later?', 'oi **** off']);
+    expect(chatsA.every((m) => !('ts' in m) || m.ts <= Date.now())).toBe(true);
     expect(chatsB).toHaveLength(0); // no echo to self
     b.stop();
     await wait(50);

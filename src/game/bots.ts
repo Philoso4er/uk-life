@@ -77,6 +77,10 @@ export interface Bot {
   kerb: number;
   /** road they're waiting to cross, -1 if not waiting */
   waitRoad: number;
+  /** building they're inside (x/y are then room coordinates), or null on the street */
+  inside?: string | null;
+  /** building they're walking to */
+  goal?: string | null;
 }
 
 /** What a walker needs to know about the street. */

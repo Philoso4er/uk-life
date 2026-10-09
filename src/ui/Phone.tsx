@@ -12,6 +12,7 @@ import { audioSettings, sfx } from '../game/audio';
 import { MAX_DM, MAX_POST } from '../net/filter';
 import { avatarUrl } from './avatarUrl';
 import { IdentityEditor } from './Identity';
+import { WISHES, levelOf } from '../game/people';
 
 export type PhoneApp = 'home' | 'natter' | 'messages' | 'new' | 'work' | 'bank' | 'goals' | 'me' | 'settings' | 'shop' | 'stuff' | `thread:${string}`;
 
@@ -101,7 +102,7 @@ export function Phone({
           ) : app === 'bank' ? (
             <Bank save={engine.save} snap={snap} />
           ) : app === 'goals' ? (
-            <Goals snap={snap} />
+            <Goals snap={snap} save={engine.save} />
           ) : app === 'me' ? (
             <Me engine={engine} save={engine.save} snap={snap} />
           ) : app === 'shop' ? (
@@ -617,10 +618,55 @@ function Bank({ save, snap }: { save: SaveState; snap: Snapshot }) {
   );
 }
 
-function Goals({ snap }: { snap: Snapshot }) {
+function Goals({ snap, save }: { snap: Snapshot; save: SaveState }) {
   const done = GOALS.filter((g) => snap.goals[g.id]).length;
+  const friends = Object.entries(save.rel ?? {})
+    .map(([k, r]) => ({ k, r, lv: levelOf(r.pts) }))
+    .filter((x) => x.lv.i > 0)
+    .sort((a, b) => b.r.pts - a.r.pts)
+    .slice(0, 8);
   return (
     <div className="app-pad">
+      <div className="section-label">🌟 Lifetime wishes</div>
+      <ul className="wishes" data-testid="wishes">
+        {WISHES.map((w) => {
+          const [a, b] = w.progress(save);
+          const got = !!save.wishes?.[w.id];
+          return (
+            <li key={w.id} className={got ? 'done' : ''}>
+              <span className="wish-emoji">{w.emoji}</span>
+              <span className="wish-main">
+                <b>{w.label}</b>
+                <span className="muted small">{w.desc} Reward: £{w.reward}</span>
+                <span className="rel-track">
+                  <span className="rel-fill" style={{ width: `${Math.round((got ? 1 : a / b) * 100)}%` }} />
+                </span>
+              </span>
+              <span className="wish-count">{got ? '✓' : `${a}/${b}`}</span>
+            </li>
+          );
+        })}
+      </ul>
+      {friends.length ? (
+        <>
+          <div className="section-label">🤝 People you know</div>
+          <ul className="wishes">
+            {friends.map(({ k, r, lv }) => (
+              <li key={k}>
+                <span className="wish-emoji">{lv.emoji}</span>
+                <span className="wish-main">
+                  <b>{r.name ?? k.replace(/^\w+:/, '')}</b>
+                  <span className="muted small">
+                    {lv.name}
+                    {r.streak > 1 ? ` · 🔥 ${r.streak}-day streak` : ''}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      <div className="section-label">🎯 Getting started</div>
       <div className="muted small">
         {done}/{GOALS.length} done
       </div>

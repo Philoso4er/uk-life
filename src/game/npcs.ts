@@ -242,6 +242,8 @@ export function systemAuthor(name: string): Author {
   return { id: 'sys:' + name.replace(/[^\w]/g, '').toLowerCase().slice(0, 30), name, handle: handleOf(name), kind: 'system', colour: '#636e72' };
 }
 
+const STAFF_DM = ['Ha! Can’t really text on shift, but go on.', 'Pop in later, I’m on till close.', 'Aw, ta. You’re one of the good ones.', 'Boss is watching. Talk later! x', 'Ha, stop it. Come in and say hi.', 'Brilliant. See you at the counter.'];
+
 /** Drives NPC posts, likes, replies and DMs. Lives in the engine; ticks with the game. */
 export class NpcBrain {
   private nextPost = Date.now() + rnd(5000, 9000);
@@ -399,7 +401,13 @@ export class NpcBrain {
     else if (author.kind === 'system') return; // landlords and banks don't do replies. Obviously.
     else {
       const p = PERSONAS.find((x) => this.author(x).id === peerId);
-      if (!p) return;
+      if (!p) {
+        // shop staff you've got chatting to: friendly, brief, on shift
+        if (!peerId.startsWith('npc:staff')) return;
+        this.social.later(800, () => this.social.setTyping(peerId, typing + 400));
+        this.social.later(800 + typing, () => this.social.incoming(author, pickOf(STAFF_DM)));
+        return;
+      }
       if (Math.random() < 0.12) {
         // left on read... then the excuse
         this.social.later(rnd(20000, 40000), () => this.social.incoming(author, pickOf(READ_AND_IGNORED)));

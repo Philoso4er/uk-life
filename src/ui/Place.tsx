@@ -28,6 +28,9 @@ export function PlaceDialog({
   greeting,
   defaultTab,
   closed,
+  only,
+  title,
+  onAll,
 }: {
   b: Building;
   save: SaveState;
@@ -42,13 +45,21 @@ export function PlaceDialog({
   defaultTab?: string;
   /** replaces the action list (e.g. someone else's house) */
   closed?: React.ReactNode;
+  /** indoors: only the actions done at this spot (the till, the bar…) */
+  only?: string[];
+  /** replaces the building name in the header */
+  title?: React.ReactNode;
+  /** "Everything here": switch to the building's full menu */
+  onAll?: () => void;
 }) {
-  const [tab, setTab] = useState(defaultTab ?? 'do');
+  const [tab, setTab] = useState(defaultTab ?? (only && tabs.length && !actionsFor(b.id, b.kind).some((a) => only.includes(a.id)) ? tabs[0].id : 'do'));
   const [run, setRun] = useState<{ a: ActionDef; secs: number; started: number } | null>(null);
   const [result, setResult] = useState<{ a: ActionDef; o: ActionOutcome } | null>(null);
   const [, force] = useState(0);
-  const list = actionsFor(b.id, b.kind);
+  const list = actionsFor(b.id, b.kind).filter((a) => !only || only.includes(a.id));
   const ctx = ctxFn();
+  // a spot with no actions of its own (e.g. the ticket machines) goes straight to its tab
+  const noDo = !!only && !list.length && !top && tabs.length > 0;
 
   // refresh cooldowns / opening hours every few seconds while open
   useEffect(() => {
@@ -100,9 +111,11 @@ export function PlaceDialog({
       <>
         {tabs.length ? (
           <div className="tabs place-tabs" role="tablist">
-            <button role="tab" className={'tab' + (tab === 'do' ? ' on' : '')} onClick={() => setTab('do')}>
-              Things to do
-            </button>
+            {noDo ? null : (
+              <button role="tab" className={'tab' + (tab === 'do' ? ' on' : '')} onClick={() => setTab('do')}>
+                Things to do
+              </button>
+            )}
             {tabs.map((t) => (
               <button key={t.id} role="tab" className={'tab' + (tab === t.id ? ' on' : '')} onClick={() => setTab(t.id)}>
                 {t.label}
@@ -115,7 +128,8 @@ export function PlaceDialog({
         ) : (
           <>
             {top}
-            {closed ?? (
+            {closed ?? (only && !list.length ? <p className="muted small">Nothing to do at this spot right now.</p> : null)}
+            {closed ? null : (
               <ul className="item-list action-list">
                 {list
                   .filter((a) => !isHidden(save, a, ctx))
@@ -126,11 +140,16 @@ export function PlaceDialog({
             )}
           </>
         )}
+        {onAll ? (
+          <button className="btn btn-ghost wide place-all" onClick={onAll} data-testid="place-all">
+            📋 Everything at {b.name.split(' · ')[0]}
+          </button>
+        ) : null}
       </>
     );
 
   return (
-    <Modal title={head} sub={run || result ? undefined : greeting ?? b.blurb} onClose={onClose} className="place-modal">
+    <Modal title={title ?? head} sub={run || result ? undefined : greeting ?? b.blurb} onClose={onClose} className="place-modal">
       {body}
     </Modal>
   );

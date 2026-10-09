@@ -18,8 +18,11 @@ import { PLACE_HOURS, placeOpen } from '../game/actions';
 import { sfx } from '../game/audio';
 import { GUIDE_STEPS, guideFinished, guideStep, skipGuide } from '../game/guide';
 import { Phone, type PhoneApp } from './Phone';
+import { HereSheet, ProfileCard, RoomBar } from './People';
+import { actionsAt, interiorFor, type UseSpot } from '../game/interiors';
+import { COMPLIMENTS, shortName, touchRel, type PersonRef } from '../game/people';
 
-type Dialog = { kind: 'building'; b: Building } | { kind: 'billboard'; bb: Billboard } | { kind: 'barber' } | { kind: 'shift'; job: JobId };
+type Dialog = { kind: 'building'; b: Building; use?: UseSpot } | { kind: 'billboard'; bb: Billboard } | { kind: 'barber' } | { kind: 'shift'; job: JobId };
 
 interface Toast {
   id: number;
@@ -58,6 +61,8 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
   const [cards, setCards] = useState<Card[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [travel, setTravel] = useState<{ icon: string; text: string } | null>(null);
+  const [person, setPerson] = useState<PersonRef | null>(null);
+  const [hereOpen, setHereOpen] = useState(false);
   const phoneRef = useRef(phone);
   phoneRef.current = phone;
 
@@ -166,6 +171,46 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     const params = new URLSearchParams(location.search);
     const e = new Engine(canvasRef.current!, save, {
       onInteract: (b) => setDialog({ kind: 'building', b }),
+      onUse: (b, use) => setDialog({ kind: 'building', b, use }),
+      onPerson: (p) => {
+        sfx.pop();
+        setPerson(p);
+      },
+      onEnter: (b) => {
+        const n = e.hereNow();
+        const names = n.slice(0, 3).map((p) => shortName(p.name));
+        toast(`📍 ${b.name.split(' · ')[0]} · 👥 ${n.length} here${names.length ? `: ${names.join(', ')}${n.length > 3 ? ` +${n.length - 3}` : ''}` : ''}`, 'info', () => setHereOpen(true));
+      },
+      onLeave: () => setHereOpen(false),
+      onAct: (m, from, boost) => {
+        const s = e.save;
+        const out: GameEvent[] = [];
+        touchRel(s, 'player:' + m.from, 1, 'wave', out, m.name);
+        const openCard = from ? () => setPerson(from) : undefined;
+        const where = m.place ? buildingById(m.place)?.name.split(' · ')[0] ?? m.place : '';
+        sfx.pop();
+        if (m.kind === 'wave' || m.kind === 'nod') toast(`👋 ${m.name} waved at you`, 'info', openCard);
+        else if (m.kind === 'compliment') toast(`💐 ${m.name}: “${COMPLIMENTS[m.n ?? 0] ?? COMPLIMENTS[0]}”`, 'good', openCard);
+        else if (m.kind === 'drink') {
+          if (boost) s.social = Math.min(100, s.social + 8);
+          toast(`🍺 ${m.name} bought you a drink!${boost ? ' 💬 +8' : ''}`, 'good', openCard);
+        } else if (m.kind === 'follow') toast(`➕ ${m.name} followed you on Natter`, 'good', openCard);
+        else if (m.kind === 'accept') toast(`👍 ${m.name} is on the way${where ? ` to ${where}` : ''}`, 'good');
+        else if (m.kind === 'decline') toast(`🙅 ${m.name} can’t make it this time`, 'info');
+        else if (m.kind === 'invite' && from)
+          card({
+            emoji: '📍',
+            kicker: 'Invite',
+            title: `${m.name} invited you to ${where || 'hang out'}`,
+            body: <p>{where ? `They’re asking you down to ${where}. Fancy it?` : 'Fancy it?'}</p>,
+            choices: [
+              { label: 'Go on then', tone: 'primary', onPick: () => void e.sendAct(from, 'accept', { place: m.place }) },
+              { label: 'Not today', tone: 'ghost', onPick: () => void e.sendAct(from, 'decline') },
+            ],
+          });
+        e.touch();
+        if (out.length) handleEventsRef.current(out);
+      },
       onBillboard: (bb) => setDialog({ kind: 'billboard', bb }),
       onEvents: (ev) => handleEventsRef.current(ev),
       onDeliveryDone: (earned, onTime, total, done, cancelled) => {
@@ -201,7 +246,7 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     createTransport().then((t) => {
       if (alive) void e.start(t);
     });
-    if (params.has('debug')) (window as unknown as { __ukl: unknown }).__ukl = { engine: e, setDialog, setPhone, setClockOffset, getClockOffset, london, msUntilRent, writeSave, card, tel: () => { const p = e.social.npcPost(e.brain.author(PERSONAS[0]), 'Can’t complain 👍', { likes: 6 }); e.brain.complain(p.id); e.social.pump(Date.now() + 120000); }, handle: (ev: GameEvent[]) => handleEventsRef.current(ev), events: eventDebug, showEvent: (id: string) => showEventRef.current(id) };
+    if (params.has('debug')) (window as unknown as { __ukl: unknown }).__ukl = { engine: e, setDialog, setPhone, setClockOffset, getClockOffset, london, msUntilRent, writeSave, card, building: buildingById, tel: () => { const p = e.social.npcPost(e.brain.author(PERSONAS[0]), 'Can’t complain 👍', { likes: 6 }); e.brain.complain(p.id); e.social.pump(Date.now() + 120000); }, handle: (ev: GameEvent[]) => handleEventsRef.current(ev), events: eventDebug, showEvent: (id: string) => showEventRef.current(id) };
     const saver = setInterval(() => writeSave(e.save), 4000);
     const onHide = () => {
       writeSave(e.save);
@@ -225,7 +270,7 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
   const social = useSyncExternalStore(engine?.social.subscribe ?? noopSub, engine?.social.getSnapshot ?? nullSnap) as SocialSnapshot | null;
 
   // pause the world whenever something modal is up
-  const modalUp = !!dialog || !!phone || cards.length > 0 || !!travel;
+  const modalUp = !!dialog || !!phone || cards.length > 0 || !!travel || !!person || hereOpen;
   useEffect(() => {
     engine?.setPaused(modalUp);
   }, [engine, modalUp]);
@@ -247,7 +292,9 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
       const typing = ['INPUT', 'TEXTAREA'].includes((document.activeElement as HTMLElement | null)?.tagName ?? '');
       if (ev.key === 'Escape') {
         if (cards.length) return;
-        if (phone) setPhone(null);
+        if (person) setPerson(null);
+        else if (hereOpen) setHereOpen(false);
+        else if (phone) setPhone(null);
         else if (dialog && dialog.kind !== 'shift') setDialog(null);
       } else if (!typing && !modalUp && (ev.key === 't' || ev.key === 'T' || ev.key === '/')) {
         ev.preventDefault();
@@ -256,7 +303,7 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
-  }, [dialog, phone, cards.length, modalUp]);
+  }, [dialog, phone, cards.length, modalUp, person, hereOpen]);
 
   showEventRef.current = (id: string) => {
     const def = EVENT_BY_ID[id];
@@ -437,28 +484,47 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
   let content: React.ReactNode = null;
   if (dialog?.kind === 'building') {
     const b = dialog.b;
+    const use = dialog.use;
     const close = () => setDialog(null);
     const ctxFn = () => ctxNow(snap.raining, engine.peopleNear(b.id));
     const job = EMPLOYER[b.id];
-    const common = { b, save: s, ctxFn, onEvents: (ev: GameEvent[]) => run(() => handleEvents(ev)), onClose: close };
+    // inside a building you use one thing at a time (the till, the bar…); "Everything here" opens the lot
+    const room = use ? interiorFor(b, s) : null;
+    const only = use && room ? actionsAt(room, use, b.id, b.kind) : undefined;
+    const wants = (sp: UseSpot['special']) => !use || use.special === sp;
+    const common = {
+      b,
+      save: s,
+      ctxFn,
+      onEvents: (ev: GameEvent[]) => run(() => handleEvents(ev)),
+      onClose: close,
+      only,
+      title: use ? (
+        <>
+          <span className="place-emoji">{use.emoji}</span>
+          {use.label}
+        </>
+      ) : undefined,
+      onAll: use ? () => setDialog({ kind: 'building', b }) : undefined,
+    };
     if (b.kind === 'jobcentre') {
       const open = placeOpen(b.id, london());
       content = (
         <PlaceDialog
           {...common}
-          tabs={[{ id: 'jobs', label: open ? 'Jobs' : 'Jobs (kiosk)', node: <JobsList save={s} onTake={takeJob} /> }]}
-          defaultTab={s.job ? 'do' : 'jobs'}
+          tabs={wants('jobs') ? [{ id: 'jobs', label: open ? 'Jobs' : 'Jobs (kiosk)', node: <JobsList save={s} onTake={takeJob} /> }] : []}
+          defaultTab={use?.special === 'jobs' ? 'jobs' : s.job || use ? 'do' : 'jobs'}
           greeting={open ? `You take a ticket: #${380 + (london().mm % 60)}. Now serving: #9.` : `The shutters are down (open ${PLACE_HOURS.jobcentre.label}). The job kiosk outside still works. Mostly.`}
         />
       );
     }
-    else if (b.kind === 'lettings') content = <PlaceDialog {...common} tabs={[{ id: 'homes', label: 'Homes', node: <HomesList save={s} onRent={rent} onSofa={backToSofa} /> }]} defaultTab="homes" greeting="Josh looks up from his phone. “Hiya! Everything’s going fast, so… yeah.”" />;
+    else if (b.kind === 'lettings') content = <PlaceDialog {...common} tabs={wants('homes') ? [{ id: 'homes', label: 'Homes', node: <HomesList save={s} onRent={rent} onSofa={backToSofa} /> }] : []} defaultTab={wants('homes') ? 'homes' : 'do'} greeting="Josh looks up from his phone. “Hiya! Everything’s going fast, so… yeah.”" />;
     else if (b.kind === 'tube') {
       const strike = s.flags.strike === london().dateKey;
       content = (
         <PlaceDialog
           {...common}
-          tabs={[
+          tabs={(wants('travel') ? [0] : []).map(() => (
             {
               id: 'travel',
               label: strike ? 'Strike!' : 'Travel',
@@ -484,9 +550,9 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
               ) : (
                 <TravelList from={b.tube!} snap={snap} onTravel={travelTo} />
               ),
-            },
-          ]}
-          defaultTab="travel"
+            }
+          ))}
+          defaultTab={wants('travel') ? 'travel' : 'do'}
         />
       );
     }
@@ -507,8 +573,11 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
           {...common}
           top={
             <>
-              {job && s.job === job ? <ShiftBanner jobId={job} save={s} onStart={() => startShift(job)} /> : null}
-              {b.kind === 'barber' ? (
+              {job && s.job === job && wants('shift') ? <ShiftBanner jobId={job} save={s} onStart={() => startShift(job)} /> : null}
+              {use?.special === 'shift' && (!job || s.job !== job) ? (
+                <p className="notice">Staff only. {job ? `Get a job here at the Jobcentre and this is where you’ll clock in.` : ''}</p>
+              ) : null}
+              {b.kind === 'barber' && wants('barber') ? (
                 <button className="btn btn-primary wide" disabled={s.money < 12} onClick={() => setDialog({ kind: 'barber' })}>
                   💈 Full new look · £12
                 </button>
@@ -554,6 +623,7 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
     <div className="game">
       <canvas ref={canvasRef} className="game-canvas" />
       <Hud snap={snap} save={s} onCancelDelivery={() => engine.cancelDelivery()} onOpenMe={() => setPhone('me')}>
+        {snap.scene ? <RoomBar engine={engine} snap={snap} onOpen={() => setHereOpen(true)} onPerson={setPerson} /> : null}
         {guideIdx >= 0 && !snap.delivery ? (
           <div className="guide panel" role="status">
             <div className="guide-step">
@@ -590,9 +660,20 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
           {social.feedUnread ? <span className="badge">{social.feedUnread > 9 ? '9+' : social.feedUnread}</span> : null}
         </button>
         <div className="action-slot">
-          {snap.nearby && !modalUp ? (
+          {snap.scene && !modalUp ? (
+            snap.nearUse ? (
+              <button className="btn btn-action" onClick={() => engine.interactNearby()} data-testid="use-btn">
+                {snap.nearUse.emoji} {snap.nearUse.label}
+                <kbd className="hide-touch">E</kbd>
+              </button>
+            ) : (
+              <button className="btn btn-action btn-soft" onClick={() => engine.inside && setDialog({ kind: 'building', b: engine.inside })} data-testid="menu-btn">
+                📋 What’s here
+              </button>
+            )
+          ) : snap.nearby && !modalUp ? (
             <button className="btn btn-action" onClick={() => engine.interactNearby()}>
-              {snap.nearby.spot ? 'Visit' : 'Enter'} {snap.nearby.name.split(' · ')[0]}
+              {snap.nearby.spot ? 'Visit' : engine.canEnter(buildingById(snap.nearby.id)) ? '🚪 Go in' : 'Enter'} {snap.nearby.name.split(' · ')[0]}
               <kbd className="hide-touch">E</kbd>
             </button>
           ) : null}
@@ -603,6 +684,34 @@ export function Game({ save, onQuit }: { save: SaveState; onQuit: () => void }) 
         </button>
       </div>
       {content}
+      {hereOpen && snap.scene && !dialog ? (
+        <HereSheet
+          engine={engine}
+          snap={snap}
+          toast={toast}
+          onClose={() => setHereOpen(false)}
+          onPerson={(p) => setPerson(p)}
+          onMenu={() => {
+            setHereOpen(false);
+            if (engine.inside) setDialog({ kind: 'building', b: engine.inside });
+          }}
+        />
+      ) : null}
+      {person ? (
+        <ProfileCard
+          key={person.key}
+          engine={engine}
+          who={person}
+          snap={snap}
+          onClose={() => setPerson(null)}
+          onEvents={(ev) => run(() => handleEvents(ev))}
+          openDM={(id) => {
+            setPerson(null);
+            setHereOpen(false);
+            setPhone(`thread:${id}`);
+          }}
+        />
+      ) : null}
       {phone ? (
         <Phone
           engine={engine}

@@ -36,6 +36,23 @@ export interface ActiveMoodlet {
   until: number;
 }
 
+/** How well you know someone (a local, a member of staff or another player). */
+export interface Rel {
+  pts: number;
+  /** real ms of the last interaction */
+  last: number;
+  /** consecutive London days you've interacted */
+  streak: number;
+  /** London date of the last streak day */
+  day: string;
+  /** action -> real ms when available again */
+  cds: Record<string, number>;
+  /** London date of the last favour */
+  fav?: string;
+  /** display name (players' keys are ids) */
+  name?: string;
+}
+
 export interface SaveState {
   version: 2;
   id: string;
@@ -88,5 +105,12 @@ export interface SaveState {
   nextEventAt: number; // real ms
   uc: { claiming: boolean; appt: string; attended: boolean; searches: number; weekEarned: number; sanctioned: boolean };
   // phase 3: things to own
+  // round 6: people
+  /** relationships, keyed npc:Name / staff:Name / player:pid */
+  rel: Record<string, Rel>;
+  /** Natter author ids you follow */
+  follows: string[];
+  /** lifetime wish id -> real ms completed */
+  wishes: Record<string, number>;
   owned: { items: string[]; btl: number; allotment: null | { planted: number; crop: string }; hustle: null | { stock: string[]; listings: { item: string; price: number; sellAt: number; haggled?: boolean }[] } };
 }

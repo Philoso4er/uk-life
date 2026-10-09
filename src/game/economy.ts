@@ -172,6 +172,9 @@ export function newSave(name: string, avatar: Avatar): SaveState {
     eventLog: {},
     nextEventAt: t + 3 * 60000,
     uc: { claiming: false, appt: '', attended: false, searches: 0, weekEarned: 0, sanctioned: false },
+    rel: {},
+    follows: [],
+    wishes: {},
     owned: { items: [], btl: 0, allotment: null, hustle: null },
   };
 }

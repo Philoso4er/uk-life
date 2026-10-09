@@ -2,16 +2,46 @@ import { drawAvatar, walkFrame } from './avatar';
 import { setRainLevel, sfx } from './audio';
 import { makeBots, makeWalkers, updateBot, type Bot } from './bots';
 import { ROADS, ZEBRAS, hitsAnyVehicle, stepVehicles, vehHalfW, zebraAt, type Car, type Person } from './traffic';
-import { catchUp, tick, type GameEvent } from './economy';
+import { JOBS, catchUp, tick, type GameEvent } from './economy';
 import { activeMoodlets, effectiveMood } from './needs';
 import { london, now as realNow } from './time';
 import { SocialStore } from './social';
 import { NpcBrain } from './npcs';
-import { findPath } from './pathfind';
+import { findPath, type Grid } from './pathfind';
+import { INTERIORS, WALL_MOUNTED, atExit, drawFurn, gridOf, interiorFor, prerenderInterior, spawnOf, useAt, type Interior, type UseSpot } from './interiors';
+import { RateLimiter, checkWishes, chatterLine, npcKey, playerKey, staffAvatar, staffKey, wantedPlace, type PersonRef } from './people';
+import { placeOpen } from './actions';
+import { newId } from './social';
+import { cleanMessage } from '../net/filter';
 import { FONT, billboardAt, drawBillboard, drawPigeon, drawTrain, drawVehicle, makeGlow, prerenderWorld } from './render';
 import type { Facing, JobId, SaveState, HomeId, GoalId } from './types';
 import { H, T, TILE, W, billboards, buildings, deliveryDoors, doorFront, inPark, isSolid, lamps, buildingById, places, spots, tiles, type Billboard, type Building } from './world';
-import type { NetMode, PlayerState, Transport } from '../net/types';
+import { MAX_SAY, type NetMode, type PlayerState, type SocialWire, type Transport } from '../net/types';
+
+export type ActWire = Extract<SocialWire, { t: 'act' }>;
+export interface RoomLine {
+  id: string;
+  name: string;
+  text: string;
+  ts: number;
+  kind: 'me' | 'player' | 'npc' | 'staff';
+}
+interface StaffEnt {
+  name: string;
+  role: string;
+  avatar: import('./types').Avatar;
+  x: number;
+  y: number;
+  facing: Facing;
+  bubble?: { text: string; until: number };
+}
+interface Scene {
+  b: Building;
+  r: Interior;
+  grid: Grid;
+  canvas: HTMLCanvasElement | null;
+  staff: StaffEnt[];
+}
 
 export interface EngineCallbacks {
   onInteract(b: Building): void;
@@ -20,6 +50,15 @@ export interface EngineCallbacks {
   /** `done` = drops actually made; `cancelled` when you bailed out early */
   onDeliveryDone(earned: number, onTime: number, total: number, done: number, cancelled: boolean): void;
   onIncoming?(kind: 'dm' | 'post', from: string, text: string): void;
+  /** walked up to a use spot inside a building (the till, the bar, the bed…) */
+  onUse?(b: Building, use: UseSpot): void;
+  /** tapped a person (street or indoors) */
+  onPerson?(p: PersonRef): void;
+  /** walked into / out of a building */
+  onEnter?(b: Building, r: Interior): void;
+  onLeave?(b: Building): void;
+  /** another player did something to you (wave, drink, invite…); `boost` = it counts for Social */
+  onAct?(m: ActWire, from: PersonRef | null, boost: boolean): void;
 }
 
 export interface DeliveryView {
@@ -61,6 +100,14 @@ export interface Snapshot {
   nearby: { id: string; name: string; spot: boolean } | null;
   delivery: DeliveryView | null;
   fps: number;
+  /** the building you're inside, if any */
+  scene: { id: string; title: string } | null;
+  /** how many other people are in the room with you */
+  here: number;
+  /** the use spot you're standing at */
+  nearUse: { id: string; label: string; emoji: string } | null;
+  /** bumps when the room chat changes */
+  chatN: number;
 }
 
 interface Remote {
@@ -69,6 +116,7 @@ interface Remote {
   ry: number;
   last: number;
   bubble?: { text: string; until: number };
+  room?: string;
 }
 
 interface Pigeon {
@@ -123,7 +171,7 @@ export class Engine {
   private netMode: NetMode = 'offline';
   private netStatus = 'offline';
   private online = 1;
-  private lastSent = { x: 0, y: 0, facing: 'down' as Facing, moving: false, at: 0 };
+  private lastSent = { x: 0, y: 0, facing: 'down' as Facing, moving: false, at: 0, room: '' };
   readonly social: SocialStore;
   readonly brain: NpcBrain;
   private delivery: { stops: { name: string; x: number; y: number }[]; index: number; deadline: number; limit: number; earned: number; onTime: number } | null = null;
@@ -136,6 +184,23 @@ export class Engine {
   private disposed = false;
   /** per-tab network id so the same save open in two tabs shows as two people */
   readonly netId: string;
+  // ---- interiors & people
+  private scene: Scene | null = null;
+  private nearUse: UseSpot | null = null;
+  private roomCanvases = new Map<string, HTMLCanvasElement>();
+  private roomGrids = new Map<string, Grid>();
+  /** locals you've invited somewhere: name -> where & until when (real ms) */
+  private overrides = new Map<string, { place: string; until: number }>();
+  private schedAt = 0;
+  private chatterAt = 0;
+  /** room chat in the building you're in (cleared when you leave) */
+  roomLog: RoomLine[] = [];
+  private chatN = 0;
+  private actOut = new RateLimiter(6, 60000, 2000);
+  private actIn = new RateLimiter(4, 30000);
+  private sayOut = new RateLimiter(5, 20000, 1500);
+  private sayIn = new RateLimiter(6, 20000);
+  private drinkIn = new RateLimiter(3, 3600000);
 
   constructor(private canvas: HTMLCanvasElement, save: SaveState, private cb: EngineCallbacks) {
     this.save = save;
@@ -178,9 +243,10 @@ export class Engine {
     this.raf = requestAnimationFrame(this.frame);
     this.transport = transport;
     this.netMode = transport.mode;
-    const regulars = makeBots(transport.mode === 'online' ? 4 : 8, [this.save.name]);
+    const regulars = makeBots(transport.mode === 'online' ? 6 : 12, [this.save.name]);
     for (const b of regulars) this.brain.setAvatar(b.name, b.avatar);
     this.bots = [...regulars, ...makeWalkers(transport.mode === 'online' ? 4 : 6)];
+    this.scheduleLocals(true);
     this.social.sender = (m) => this.transport?.sendSocial(m);
     this.social.onIncoming = (kind, a, text) => this.cb.onIncoming?.(kind, a.name, text);
     const out: GameEvent[] = [];
@@ -195,12 +261,21 @@ export class Engine {
           if (p.pid) this.social.upsertAuthor({ id: p.pid, name: p.name, handle: '@' + p.name.replace(/[^\w]/g, '').slice(0, 14), kind: 'player', avatar: p.avatar });
           const r = this.remotes.get(p.id);
           if (r) {
+            if ((r.room ?? '') !== (p.room ?? '')) {
+              // walked through a door: jump, don't glide across the map
+              r.rx = p.x;
+              r.ry = p.y;
+              this.dirty = true;
+            }
             r.p = p;
+            r.room = p.room;
             r.last = performance.now();
-          } else this.remotes.set(p.id, { p, rx: p.x, ry: p.y, last: performance.now() });
+          } else this.remotes.set(p.id, { p, rx: p.x, ry: p.y, last: performance.now(), room: p.room });
         },
         onLeave: (id) => this.remotes.delete(id),
         onSocial: (m) => {
+          if (m.t === 'act') return this.receiveAct(m);
+          if (m.t === 'say') return this.receiveSay(m);
           this.social.receive(m);
           if (m.t === 'post' && !m.replyTo && !this.social.isMuted(m.from)) {
             for (const r of this.remotes.values()) if (r.p.pid === m.from) r.bubble = { text: m.text, until: this.t + 6 };
@@ -286,11 +361,16 @@ export class Engine {
       nearby: this.nearby ? { id: this.nearby.id, name: this.nearby.name, spot: this.nearby.kind === 'spot' } : null,
       delivery: d ? { target: d.stops[d.index].name, remaining: Math.max(0, d.deadline - this.t), index: d.index, total: d.stops.length, earned: d.earned } : null,
       fps: Math.round(this.fps),
+      scene: this.scene ? { id: this.scene.b.id, title: this.scene.r.title } : null,
+      here: this.scene ? this.hereNow().length : 0,
+      nearUse: this.nearUse ? { id: this.nearUse.id, label: this.nearUse.label, emoji: this.nearUse.emoji } : null,
+      chatN: this.chatN,
     };
   }
 
   // ------------------------------------------------------------ public API
   teleport(x: number, y: number) {
+    if (this.scene) this.exitScene();
     const p = this.validSpawn(x, y);
     this.player.x = p.x;
     this.player.y = p.y;
@@ -319,7 +399,7 @@ export class Engine {
   }
 
   walkTo(x: number, y: number, pending: string | null = null) {
-    const path = findPath(this.player.x, this.player.y, x, y, 'player');
+    const path = this.scene ? findPath(this.player.x, this.player.y, x, y, 'plain', this.scene.grid) : findPath(this.player.x, this.player.y, x, y, 'player');
     this.player.path = path ?? [];
     this.player.pending = path ? pending : null;
     this.player.stuck = 0;
@@ -333,7 +413,354 @@ export class Engine {
   private lastWalkFrame = -1;
 
   interactNearby() {
-    if (this.nearby && !this.paused) this.cb.onInteract(this.nearby);
+    if (this.paused) return;
+    if (this.scene) {
+      if (this.nearUse) this.cb.onUse?.(this.scene.b, this.nearUse);
+      return;
+    }
+    if (this.nearby) this.arriveDoor(this.nearby);
+  }
+
+  // ------------------------------------------------------------ interiors
+  /** Can you walk into this building (vs. just getting its menu)? */
+  canEnter(b: Building) {
+    return !this.delivery && !!interiorFor(b, this.save) && placeOpen(b.id, london());
+  }
+  private arriveDoor(b: Building) {
+    if (this.canEnter(b)) this.enterBuilding(b);
+    else this.cb.onInteract(b);
+  }
+  get inside() {
+    return this.scene?.b ?? null;
+  }
+  get room() {
+    return this.scene?.r ?? null;
+  }
+  enterBuilding(b: Building) {
+    const r = interiorFor(b, this.save);
+    if (!r) return false;
+    let canvas = this.roomCanvases.get(r.id + ':' + r.title + ':' + r.furn.length) ?? null;
+    if (!canvas && typeof document !== 'undefined') {
+      canvas = prerenderInterior(r, 2);
+      this.roomCanvases.set(r.id + ':' + r.title + ':' + r.furn.length, canvas);
+    }
+    const staff = r.staff.map((st) => ({ name: st.name, role: st.role, avatar: staffAvatar(st), x: st.at[0], y: st.at[1], facing: st.face }));
+    this.scene = { b, r, grid: gridOf(r), canvas, staff };
+    const sp = spawnOf(r);
+    const p = this.player;
+    p.x = sp.x;
+    p.y = sp.y;
+    p.facing = 'up';
+    p.path = [];
+    p.pending = null;
+    p.moving = false;
+    this.cam.x = p.x * TILE;
+    this.cam.y = p.y * TILE;
+    const f = doorFront(b);
+    this.save.pos = { x: f.x, y: f.y };
+    this.nearby = null;
+    this.roomLog = [];
+    this.chatN++;
+    this.chatterAt = this.t + 4;
+    sfx.pop();
+    this.sendNet(true);
+    this.dirty = true;
+    this.cb.onEnter?.(b, r);
+    return true;
+  }
+  /** Walk back out onto the street, just outside the same door. */
+  leaveBuilding() {
+    const b = this.exitScene();
+    if (b) this.cb.onLeave?.(b);
+  }
+  private exitScene() {
+    const sc = this.scene;
+    if (!sc) return null;
+    this.scene = null;
+    this.nearUse = null;
+    const f = doorFront(sc.b);
+    const p = this.player;
+    const pos = this.validSpawn(f.x, f.y);
+    p.x = pos.x;
+    p.y = pos.y;
+    p.facing = sc.b.face === 'N' ? 'up' : 'down';
+    p.path = [];
+    p.pending = null;
+    this.cam.x = p.x * TILE;
+    this.cam.y = p.y * TILE;
+    this.save.pos = { x: p.x, y: p.y };
+    this.roomLog = [];
+    this.chatN++;
+    this.sendNet(true);
+    this.dirty = true;
+    return sc.b;
+  }
+  private gridFor(id: string) {
+    let g = this.roomGrids.get(id);
+    if (!g) {
+      g = gridOf(INTERIORS[id]);
+      this.roomGrids.set(id, g);
+    }
+    return g;
+  }
+
+  // ------------------------------------------------------------ people
+  private botRef(b: Bot): PersonRef {
+    return { key: npcKey(b.name), kind: 'npc', name: b.name, avatar: b.avatar, place: b.inside ?? null };
+  }
+  private remoteRef(r: Remote): PersonRef {
+    return { key: playerKey(r.p.pid ?? r.p.id), kind: 'player', name: r.p.name, avatar: r.p.avatar, netId: r.p.id, pid: r.p.pid, place: r.p.room ?? null, mood: r.p.mood, status: r.p.status };
+  }
+  private staffRef(st: StaffEnt): PersonRef {
+    return { key: staffKey(st.name), kind: 'staff', name: st.name, avatar: st.avatar, place: this.scene?.b.id ?? null, role: st.role };
+  }
+  /** Everyone in the building with you (staff, locals, real players). */
+  hereNow(): PersonRef[] {
+    const sc = this.scene;
+    if (!sc) return [];
+    const out: PersonRef[] = sc.staff.map((st) => this.staffRef(st));
+    for (const b of this.bots) if (b.inside === sc.b.id) out.push(this.botRef(b));
+    for (const r of this.remotes.values()) if (r.p.room === sc.b.id) out.push(this.remoteRef(r));
+    return out;
+  }
+  /** People inside a building (not counting staff), for the street badges. */
+  occupancy(id: string) {
+    let n = 0;
+    for (const b of this.bots) if (b.inside === id) n++;
+    for (const r of this.remotes.values()) if (r.p.room === id) n++;
+    return n;
+  }
+  /** Find a person by their key (for refreshing a profile card). */
+  personByKey(key: string): PersonRef | null {
+    if (key.startsWith('staff:')) {
+      const st = this.scene?.staff.find((x) => staffKey(x.name) === key);
+      return st ? this.staffRef(st) : null;
+    }
+    if (key.startsWith('npc:')) {
+      const b = this.bots.find((x) => !x.ambient && npcKey(x.name) === key);
+      return b ? this.botRef(b) : null;
+    }
+    for (const r of this.remotes.values()) if (playerKey(r.p.pid ?? r.p.id) === key) return this.remoteRef(r);
+    return null;
+  }
+  private personAt(wx: number, wy: number): PersonRef | null {
+    const sc = this.scene;
+    let best: { y: number; ref: () => PersonRef } | null = null;
+    const hit = (x: number, y: number, ref: () => PersonRef) => {
+      if (Math.abs(wx - x) < 0.45 && wy > y - 1.55 && wy < y + 0.25 && (!best || y > best.y)) best = { y, ref };
+    };
+    if (sc) {
+      for (const st of sc.staff) hit(st.x, st.y, () => this.staffRef(st));
+      for (const b of this.bots) if (b.inside === sc.b.id) hit(b.x, b.y, () => this.botRef(b));
+      for (const r of this.remotes.values()) if (r.p.room === sc.b.id) hit(r.rx, r.ry, () => this.remoteRef(r));
+    } else {
+      for (const b of this.bots) if (!b.ambient && !b.inside) hit(b.x, b.y, () => this.botRef(b));
+      for (const r of this.remotes.values()) if (!r.p.room) hit(r.rx, r.ry, () => this.remoteRef(r));
+    }
+    return best ? (best as { ref: () => PersonRef }).ref() : null;
+  }
+  /** Pop a speech/emote bubble over someone. */
+  emote(who: PersonRef, text: string) {
+    const bubble = { text: text.length > 90 ? text.slice(0, 88) + '…' : text, until: this.t + 5 };
+    if (who.kind === 'staff') {
+      const st = this.scene?.staff.find((x) => x.name === who.name);
+      if (st) st.bubble = bubble;
+    } else if (who.kind === 'npc') {
+      const b = this.bots.find((x) => x.name === who.name);
+      if (b) b.bubble = bubble;
+    } else for (const r of this.remotes.values()) if (r.p.id === who.netId) r.bubble = bubble;
+  }
+  /** Face someone you're talking to. */
+  faceTowards(who: PersonRef) {
+    let x: number | null = null;
+    let y = 0;
+    if (who.kind === 'staff') {
+      const st = this.scene?.staff.find((s) => s.name === who.name);
+      if (st) [x, y] = [st.x, st.y];
+    } else if (who.kind === 'npc') {
+      const b = this.bots.find((s) => s.name === who.name);
+      if (b && (b.inside ?? null) === (this.scene?.b.id ?? null)) [x, y] = [b.x, b.y];
+    }
+    if (x == null) return;
+    const dx = x - this.player.x;
+    const dy = y - this.player.y;
+    this.player.facing = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
+  }
+  /** Send a canned action to another player. Returns an error, or null when sent. */
+  sendAct(who: PersonRef, kind: ActWire['kind'], extra: { n?: number; place?: string } = {}): string | null {
+    if (!who.netId) return 'They’ve gone.';
+    if (!this.transport) return 'Not connected.';
+    if (!this.actOut.ok('all')) return 'Easy, tiger. Give it a few seconds.';
+    this.transport.sendSocial({ t: 'act', id: newId(), from: this.save.id, name: this.save.name, to: who.netId, kind, ...extra });
+    return null;
+  }
+  private receiveAct(m: ActWire) {
+    if (m.to !== this.netId || m.from === this.save.id || this.social.isMuted(m.from)) return;
+    if (!this.actIn.ok(m.from)) return;
+    let ref: PersonRef | null = null;
+    for (const r of this.remotes.values())
+      if (r.p.pid === m.from) {
+        ref = this.remoteRef(r);
+        r.bubble = { text: { wave: '👋', nod: '🙂', compliment: '💐', drink: '🍺', follow: '➕', invite: '📍', accept: '👍', decline: '🙅' }[m.kind], until: this.t + 4 };
+      }
+    const boost = m.kind === 'drink' ? this.drinkIn.ok(m.from) : true;
+    this.cb.onAct?.(m, ref, boost);
+  }
+  /** Say something out loud in the room you're in (everyone inside sees it). */
+  sayInRoom(raw: string): string | null {
+    const sc = this.scene;
+    if (!sc) return 'You’re not inside anywhere.';
+    const text = cleanMessage(raw, MAX_SAY);
+    if (!text) return 'Say something first.';
+    if (!this.sayOut.ok('all')) return 'Let someone else get a word in.';
+    const line: RoomLine = { id: newId(), name: this.save.name, text, ts: Date.now(), kind: 'me' };
+    this.pushRoom(line);
+    this.say(text);
+    this.transport?.sendSocial({ t: 'say', id: line.id, from: this.save.id, name: this.save.name, room: sc.b.id, text, ts: line.ts });
+    return null;
+  }
+  private receiveSay(m: Extract<SocialWire, { t: 'say' }>) {
+    const sc = this.scene;
+    if (!sc || m.room !== sc.b.id || m.from === this.save.id || this.social.isMuted(m.from)) return;
+    if (!this.sayIn.ok(m.from)) return;
+    if (this.roomLog.some((l) => l.id === m.id)) return;
+    this.pushRoom({ id: m.id, name: m.name, text: m.text, ts: Date.now(), kind: 'player' });
+    for (const r of this.remotes.values()) if (r.p.pid === m.from) r.bubble = { text: m.text, until: this.t + 6 };
+  }
+  private pushRoom(l: RoomLine) {
+    this.roomLog = [...this.roomLog.slice(-29), l];
+    this.chatN++;
+    this.dirty = true;
+  }
+  /** Invite a local somewhere: they'll head there for the next half hour. */
+  inviteLocal(name: string, place: string) {
+    this.overrides.set(name, { place, until: Date.now() + 30 * 60000 });
+    this.schedAt = 0;
+  }
+
+  /** Send locals to (and from) the places on their routine. */
+  private scheduleLocals(initial = false) {
+    const t = london();
+    for (const b of this.bots) {
+      if (b.ambient) continue;
+      const want = wantedPlace(b.name, t, this.overrides.get(b.name));
+      if (b.inside && b.inside !== want) {
+        // out the door
+        const f = doorFront(buildingById(b.inside));
+        b.inside = null;
+        b.x = f.x;
+        b.y = f.y;
+        b.path = [];
+        b.wait = 0.4;
+        b.bubble = undefined;
+      }
+      if (!want || b.inside === want) {
+        if (!want) b.goal = null;
+        continue;
+      }
+      if (initial || !INTERIORS[want]) {
+        this.botEnter(b, want);
+        continue;
+      }
+      if (b.goal !== want) {
+        b.goal = want;
+        b.path = [];
+        b.wait = Math.min(b.wait, 0.5);
+      }
+    }
+  }
+  private botEnter(b: Bot, place: string) {
+    const r = INTERIORS[place];
+    b.goal = null;
+    b.path = [];
+    if (!r) return;
+    b.inside = place;
+    const g = this.gridFor(place);
+    const taken = this.bots.filter((o) => o !== b && o.inside === place).map((o) => [o.x, o.y]);
+    const free = r.hang.filter(([x, y]) => !taken.some(([ox, oy]) => Math.hypot(ox - x, oy - y) < 0.6) && !g.solid(Math.floor(x), Math.floor(y)));
+    const sp = spawnOf(r);
+    const [x, y] = free.length ? free[Math.floor(Math.random() * free.length)] : [sp.x, sp.y - 1];
+    b.x = x;
+    b.y = y;
+    b.facing = 'down';
+    b.moving = false;
+    b.wait = 4 + Math.random() * 10;
+    b.phone = Math.random() < 0.3;
+    this.dirty = true;
+  }
+  private updateIndoorBot(b: Bot, dt: number) {
+    const r = INTERIORS[b.inside!];
+    if (!r) {
+      b.inside = null;
+      return;
+    }
+    if (b.wait > 0) {
+      b.wait -= dt;
+      b.moving = false;
+      return;
+    }
+    if (!b.path.length) {
+      const taken = this.bots.filter((o) => o !== b && o.inside === b.inside).map((o) => [o.x, o.y]);
+      const free = r.hang.filter(([x, y]) => !taken.some(([ox, oy]) => Math.hypot(ox - x, oy - y) < 0.7) && Math.hypot(x - b.x, y - b.y) > 0.5);
+      if (!free.length) {
+        b.wait = 5;
+        return;
+      }
+      const [hx, hy] = free[Math.floor(Math.random() * free.length)];
+      b.path = findPath(b.x, b.y, hx, hy, 'plain', this.gridFor(b.inside!)) ?? [];
+      if (!b.path.length) b.wait = 4;
+      return;
+    }
+    const t = b.path[0];
+    const dx = t.x - b.x;
+    const dy = t.y - b.y;
+    const d = Math.hypot(dx, dy);
+    const step = b.speed * 0.6 * dt;
+    if (d <= step) {
+      b.x = t.x;
+      b.y = t.y;
+      b.path.shift();
+      if (!b.path.length) {
+        b.wait = 8 + Math.random() * 16;
+        b.facing = Math.random() < 0.6 ? 'down' : Math.random() < 0.5 ? 'left' : 'right';
+        b.phone = Math.random() < 0.3;
+      }
+    } else {
+      b.x += (dx / d) * step;
+      b.y += (dy / d) * step;
+      b.facing = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
+    }
+    b.moving = true;
+  }
+  /** Locals heading somewhere walk to its door, then go in. */
+  private steerLocal(b: Bot) {
+    if (!b.goal || b.inside) return;
+    const f = doorFront(buildingById(b.goal));
+    if (Math.hypot(b.x - f.x, b.y - f.y) < 0.7) return this.botEnter(b, b.goal);
+    if (!b.path.length && b.wait <= 0) {
+      const path = findPath(b.x, b.y, f.x, f.y, 'ped');
+      if (path) b.path = path;
+      else this.botEnter(b, b.goal); // can't find a way: they pop in anyway
+    }
+  }
+  /** Background chatter in the room you're in: the "chat spot". */
+  private roomChatter() {
+    const sc = this.scene;
+    if (!sc || this.t < this.chatterAt) return;
+    this.chatterAt = this.t + 9 + Math.random() * 10;
+    const locals = this.bots.filter((b) => b.inside === sc.b.id);
+    const useStaff = !locals.length || Math.random() < 0.3;
+    if (useStaff && sc.staff.length && sc.b.kind !== 'home') {
+      const st = sc.staff[Math.floor(Math.random() * sc.staff.length)];
+      const text = chatterLine(sc.b.id, true);
+      st.bubble = { text, until: this.t + 5 };
+      this.pushRoom({ id: newId(), name: st.name, text, ts: Date.now(), kind: 'staff' });
+    } else if (locals.length) {
+      const b = locals[Math.floor(Math.random() * locals.length)];
+      const text = chatterLine(sc.b.id);
+      b.bubble = { text, until: this.t + 5 };
+      this.pushRoom({ id: newId(), name: b.name, text, ts: Date.now(), kind: 'npc' });
+    }
   }
 
   /** Show a speech bubble over your own head (after posting on Natter). */
@@ -349,8 +776,8 @@ export class Engine {
     const b = buildingById(placeId);
     if (!b) return 0;
     const f = doorFront(b);
-    let n = this.bots.filter((x) => !x.ambient && Math.hypot(x.x - f.x, x.y - f.y) < r).length;
-    for (const x of this.remotes.values()) if (Math.hypot(x.rx - f.x, x.ry - f.y) < r) n++;
+    let n = this.bots.filter((x) => !x.ambient && (x.inside ? x.inside === placeId : Math.hypot(x.x - f.x, x.y - f.y) < r)).length;
+    for (const x of this.remotes.values()) if (x.p.room ? x.p.room === placeId : Math.hypot(x.rx - f.x, x.ry - f.y) < r) n++;
     return n;
   }
   /** Real players currently in Peckwell (for starting DMs). */
@@ -365,6 +792,7 @@ export class Engine {
   }
 
   startDelivery() {
+    if (this.scene) this.exitScene(); // the bike's outside
     const pfc = doorFront(buildingById('pfc'));
     const pool = [...deliveryDoors].sort(() => Math.random() - 0.5).slice(0, 3);
     this.delivery = { stops: pool, index: 0, deadline: 0, limit: 0, earned: 0, onTime: 0 };
@@ -421,7 +849,7 @@ export class Engine {
       e.preventDefault();
     }
     if (k === 'e' || k === 'enter' || k === ' ') {
-      if (this.nearby) {
+      if (this.nearby || this.nearUse) {
         e.preventDefault();
         this.interactNearby();
       }
@@ -441,6 +869,29 @@ export class Engine {
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
     const w = this.screenToWorld(sx, sy);
+    const who = this.personAt(w.x, w.y);
+    if (who) {
+      this.cb.onPerson?.(who);
+      return;
+    }
+    if (this.scene) {
+      const r = this.scene.r;
+      const u = useAt(r, w.x, w.y);
+      if (u) {
+        this.walkTo(u.at[0], u.at[1], 'use:' + u.id);
+        this.tap = { x: u.at[0], y: u.at[1], t: this.t };
+        return;
+      }
+      if (w.y > r.h - 1.25 && Math.abs(w.x - (r.exit + 0.5)) < 1.3) {
+        this.walkTo(r.exit + 0.5, r.h - 0.3, 'exit');
+        this.tap = { x: r.exit + 0.5, y: r.h - 0.5, t: this.t };
+        return;
+      }
+      this.walkTo(w.x, w.y);
+      this.tap = { x: w.x, y: w.y, t: this.t };
+      this.holding = { sx, sy };
+      return;
+    }
     const bb = billboardAt(w.x, w.y);
     if (bb) {
       this.cb.onBillboard(bb);
@@ -470,11 +921,15 @@ export class Engine {
   private onHover = (e: MouseEvent) => {
     const rect = this.canvas.getBoundingClientRect();
     const w = this.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+    if (this.scene) {
+      this.canvas.style.cursor = this.personAt(w.x, w.y) || useAt(this.scene.r, w.x, w.y) ? 'pointer' : 'default';
+      return;
+    }
     const bb = billboardAt(w.x, w.y);
     this.hoverBillboard = bb?.id ?? null;
     const tx = Math.floor(w.x);
     const ty = Math.floor(w.y);
-    const onBuilding = buildings.some((b) => tx >= b.x && tx < b.x + b.w && ty >= b.y && ty < b.y + b.h) || spots.some((sp) => Math.hypot(sp.x - w.x, sp.y - 0.6 - w.y) < 0.9);
+    const onBuilding = !!this.personAt(w.x, w.y) || buildings.some((b) => tx >= b.x && tx < b.x + b.w && ty >= b.y && ty < b.y + b.h) || spots.some((sp) => Math.hypot(sp.x - w.x, sp.y - 0.6 - w.y) < 0.9);
     this.canvas.style.cursor = bb || onBuilding ? 'pointer' : 'default';
   };
 
@@ -498,6 +953,8 @@ export class Engine {
   }
 
   private blocked(x: number, y: number) {
+    const g = this.scene?.grid;
+    if (g) return g.solid(Math.floor(x - R), Math.floor(y - 0.22)) || g.solid(Math.floor(x + R), Math.floor(y - 0.22)) || g.solid(Math.floor(x - R), Math.floor(y + 0.12)) || g.solid(Math.floor(x + R), Math.floor(y + 0.12));
     return isSolid(Math.floor(x - R), Math.floor(y - 0.22)) || isSolid(Math.floor(x + R), Math.floor(y - 0.22)) || isSolid(Math.floor(x - R), Math.floor(y + 0.12)) || isSolid(Math.floor(x + R), Math.floor(y + 0.12));
   }
 
@@ -530,9 +987,19 @@ export class Engine {
         if (d < 0.12) {
           p.path.shift();
           if (!p.path.length && p.pending) {
-            const b = places.find((b) => b.id === p.pending);
+            const pend = p.pending;
             p.pending = null;
-            if (b) this.cb.onInteract(b);
+            if (this.scene) {
+              const u = pend.startsWith('use:') ? this.scene.r.uses.find((x) => 'use:' + x.id === pend) : null;
+              if (u) {
+                p.facing = u.face;
+                this.nearUse = u;
+                this.cb.onUse?.(this.scene.b, u);
+              }
+            } else {
+              const b = places.find((b) => b.id === pend);
+              if (b) this.arriveDoor(b);
+            }
           }
         } else {
           vx = dx / d;
@@ -557,8 +1024,10 @@ export class Engine {
       };
       if (!this.blocked(p.x + mx, p.y) && !car(p.x + mx, p.y)) p.x += mx;
       if (!this.blocked(p.x, p.y + my) && !car(p.x, p.y + my)) p.y += my;
-      p.x = Math.max(0.4, Math.min(W - 0.4, p.x));
-      p.y = Math.max(0.4, Math.min(H - 0.2, p.y));
+      const MW = this.scene ? this.scene.r.w : W;
+      const MH = this.scene ? this.scene.r.h : H;
+      p.x = Math.max(0.4, Math.min(MW - 0.4, p.x));
+      p.y = Math.max(0.4, Math.min(MH - 0.2, p.y));
       const moved = Math.hypot(p.x - ox, p.y - oy);
       if (p.path.length && moved < step * 0.2) {
         // waiting for a bus to pass isn't "stuck"; only give up if it's been a while
@@ -572,12 +1041,14 @@ export class Engine {
       p.moving = moved > 0.0005;
       // footsteps land on frames 0 and 4 of the walk cycle
       const wf = walkFrame(this.t);
-      if (p.moving && !this.delivery && wf !== this.lastWalkFrame && (wf === 0 || wf === 4)) sfx.step(tiles[Math.floor(p.y) * W + Math.floor(p.x)] === T.Grass ? 'grass' : 'pave');
+      if (p.moving && !this.delivery && wf !== this.lastWalkFrame && (wf === 0 || wf === 4)) sfx.step(!this.scene && tiles[Math.floor(p.y) * W + Math.floor(p.x)] === T.Grass ? 'grass' : 'pave');
       this.lastWalkFrame = wf;
       if (Math.abs(vx) > Math.abs(vy) * 1.1) p.facing = vx > 0 ? 'right' : 'left';
       else p.facing = vy > 0 ? 'down' : 'up';
-      this.save.pos.x = p.x;
-      this.save.pos.y = p.y;
+      if (!this.scene) {
+        this.save.pos.x = p.x;
+        this.save.pos.y = p.y;
+      } else if (atExit(this.scene.r, p.x, p.y)) this.leaveBuilding();
     } else p.moving = false;
 
     // ---- clock + needs (real UK time; your personal clock runs faster while you're out and about)
@@ -587,10 +1058,16 @@ export class Engine {
       const tNow = realNow();
       const dtMs = Math.max(0, Math.min(5000, tNow - this.lastTickReal));
       this.lastTickReal = tNow;
-      tick(this.save, { raining: this.raining, outdoors: !this.indoors, inPark: inPark(p.x, p.y), onShift: !!this.delivery, dtMs, active: !this.paused }, events);
+      tick(this.save, { raining: this.raining, outdoors: !this.indoors && !this.scene, inPark: inPark(p.x, p.y), onShift: !!this.delivery, dtMs, active: !this.paused }, events);
       this.social.pump(Date.now());
       if (this.bots.length) this.brain.tick(this.npcCtx());
-      setRainLevel(this.rainLevel * (this.indoors ? 0.3 : 1));
+      setRainLevel(this.rainLevel * (this.indoors || this.scene ? 0.3 : 1));
+      if (this.t >= this.schedAt) {
+        this.schedAt = this.t + 3;
+        this.scheduleLocals();
+        checkWishes(this.save, events);
+      }
+      this.roomChatter();
       if (tNow > this.weatherAt) {
         if (this.weatherAt) this.rollWeather();
         this.weatherAt = tNow + 120000;
@@ -618,10 +1095,25 @@ export class Engine {
       this.dirty = true;
     }
 
-    // ---- nearby door
+    // ---- nearby door (or, indoors, the thing you're standing at)
     let best: Building | null = null;
     let bd = 1.25;
-    for (const b of places) {
+    if (this.scene) {
+      let nu: UseSpot | null = null;
+      let nd = 0.85;
+      for (const u of this.scene.r.uses) {
+        const d = Math.hypot(u.at[0] - p.x, u.at[1] - p.y);
+        if (d < nd) {
+          nd = d;
+          nu = u;
+        }
+      }
+      if (nu !== this.nearUse) {
+        this.nearUse = nu;
+        this.dirty = true;
+      }
+    }
+    for (const b of this.scene ? [] : places) {
       const f = doorFront(b);
       const d = Math.hypot(f.x - p.x, (f.y - p.y) * 1.3);
       if (d < bd) {
@@ -636,7 +1128,13 @@ export class Engine {
 
     // ---- NPCs & remote players
     const street = { vehicles: this.vehicles };
-    for (const b of this.bots) updateBot(b, dt, street);
+    for (const b of this.bots) {
+      if (b.inside) this.updateIndoorBot(b, dt);
+      else {
+        this.steerLocal(b);
+        if (!b.inside) updateBot(b, dt, street);
+      }
+    }
     const now = performance.now();
     for (const [id, r] of this.remotes) {
       const k = Math.min(1, dt * 10);
@@ -661,8 +1159,8 @@ export class Engine {
     this.cam.y += (ty - this.cam.y) * k;
     const halfW = this.vw / 2 / this.zoom;
     const halfH = this.vh / 2 / this.zoom;
-    const ww = W * TILE;
-    const wh = H * TILE;
+    const ww = (this.scene ? this.scene.r.w : W) * TILE;
+    const wh = (this.scene ? this.scene.r.h + 0.6 : H) * TILE;
     this.cam.x = halfW * 2 >= ww ? ww / 2 : Math.max(halfW, Math.min(ww - halfW, this.cam.x));
     this.cam.y = halfH * 2 >= wh ? wh / 2 : Math.max(halfH, Math.min(wh - halfH, this.cam.y));
 
@@ -687,7 +1185,21 @@ export class Engine {
   }
 
   private playerState(): PlayerState {
-    return { id: this.netId, pid: this.save.id, name: this.save.name, avatar: this.save.avatar, x: +this.player.x.toFixed(2), y: +this.player.y.toFixed(2), facing: this.player.facing, moving: this.player.moving, bike: !!this.delivery };
+    const s = this.save;
+    return {
+      id: this.netId,
+      pid: s.id,
+      name: s.name,
+      avatar: s.avatar,
+      x: +this.player.x.toFixed(2),
+      y: +this.player.y.toFixed(2),
+      facing: this.player.facing,
+      moving: this.player.moving,
+      bike: !!this.delivery,
+      room: this.scene?.b.id,
+      mood: Math.round(effectiveMood(s, this.raining)),
+      status: s.job ? `${JOBS[s.job].title}${s.jobLevel > 1 ? ` (level ${s.jobLevel})` : ''}` : 'Looking for work',
+    };
   }
 
   private sendNet(force: boolean) {
@@ -695,11 +1207,11 @@ export class Engine {
     const now = performance.now();
     const p = this.player;
     const l = this.lastSent;
-    const changed = Math.hypot(p.x - l.x, p.y - l.y) > 0.05 || p.facing !== l.facing || p.moving !== l.moving;
+    const changed = Math.hypot(p.x - l.x, p.y - l.y) > 0.05 || p.facing !== l.facing || p.moving !== l.moving || (this.scene?.b.id ?? '') !== l.room;
     const interval = this.netMode === 'online' ? 200 : 100; // ~5 msgs/s while moving keeps Supabase quotas sane
     if (force || (changed && now - l.at > interval) || now - l.at > 2500) {
       this.transport.sendState(this.playerState());
-      this.lastSent = { x: p.x, y: p.y, facing: p.facing, moving: p.moving, at: now };
+      this.lastSent = { x: p.x, y: p.y, facing: p.facing, moving: p.moving, at: now, room: this.scene?.b.id ?? '' };
     }
   }
 
@@ -734,9 +1246,9 @@ export class Engine {
 
   /** Everyone on foot, for the drivers. */
   private pedestrians(): Person[] {
-    const out: Person[] = [{ x: this.player.x, y: this.player.y }];
-    for (const b of this.bots) out.push(b);
-    for (const r of this.remotes.values()) out.push({ x: r.rx, y: r.ry });
+    const out: Person[] = this.scene ? [] : [{ x: this.player.x, y: this.player.y }];
+    for (const b of this.bots) if (!b.inside) out.push(b);
+    for (const r of this.remotes.values()) if (!r.p.room) out.push({ x: r.rx, y: r.ry });
     return out;
   }
 
@@ -747,14 +1259,15 @@ export class Engine {
       const rd = ROADS[z.road];
       const inX = (x: number) => x >= z.x0 - 0.15 && x < z.x1 + 0.15;
       const onIt = (x: number, y: number) => inX(x) && y >= rd.y0 - 0.1 && y < rd.y1 + 0.1;
-      if (onIt(p.x, p.y)) return true;
+      if (!this.scene && onIt(p.x, p.y)) return true;
       // you at the kerb, facing the road
-      if (inX(p.x) && ((p.y >= rd.y0 - 0.9 && p.y < rd.y0 && p.facing === 'down') || (p.y >= rd.y1 && p.y < rd.y1 + 0.9 && p.facing === 'up'))) return true;
+      if (!this.scene && inX(p.x) && ((p.y >= rd.y0 - 0.9 && p.y < rd.y0 && p.facing === 'down') || (p.y >= rd.y1 && p.y < rd.y1 + 0.9 && p.facing === 'up'))) return true;
       for (const b of this.bots) {
+        if (b.inside) continue;
         if (onIt(b.x, b.y)) return true;
         if (b.waitRoad === z.road && zebraAt(b.x, z.road) === i) return true;
       }
-      for (const r of this.remotes.values()) if (onIt(r.rx, r.ry)) return true;
+      for (const r of this.remotes.values()) if (!r.p.room && onIt(r.rx, r.ry)) return true;
       return false;
     });
   }
@@ -772,7 +1285,7 @@ export class Engine {
           if (isSolid(Math.floor(g.x), Math.floor(g.y)) || g.x < 1 || g.x > W - 1 || g.y < 3 || g.y > H - 1) g.fly = 0.6;
         }
       } else {
-        const scare = Math.hypot(g.x - this.player.x, g.y - this.player.y) < 1.4 || this.bots.some((b) => Math.hypot(g.x - b.x, g.y - b.y) < 0.9);
+        const scare = (!this.scene && Math.hypot(g.x - this.player.x, g.y - this.player.y) < 1.4) || this.bots.some((b) => !b.inside && Math.hypot(g.x - b.x, g.y - b.y) < 0.9);
         if (scare) {
           const a = Math.atan2(g.y - this.player.y, g.x - this.player.x) + (Math.random() - 0.5);
           g.vx = Math.cos(a) * 4;
@@ -810,6 +1323,7 @@ export class Engine {
 
   // ------------------------------------------------------------ rendering
   private render() {
+    if (this.scene) return this.renderRoom(this.scene);
     const ctx = this.ctx;
     const S = this.dpr * this.zoom;
     const left = this.cam.x - this.vw / 2 / this.zoom;
@@ -913,7 +1427,7 @@ export class Engine {
       tag: () => this.nameTag(p.x, p.y, this.save.name, 'me', this.bubble),
     });
     for (const b of this.bots) {
-      if (!vis(b.x * TILE, b.y * TILE)) continue;
+      if (b.inside || !vis(b.x * TILE, b.y * TILE)) continue;
       ents.push({
         y: b.y,
         draw: () => {
@@ -926,7 +1440,7 @@ export class Engine {
       });
     }
     for (const r of this.remotes.values()) {
-      if (!vis(r.rx * TILE, r.ry * TILE)) continue;
+      if (r.p.room || !vis(r.rx * TILE, r.ry * TILE)) continue;
       ents.push({
         y: r.ry,
         draw: () => {
@@ -972,6 +1486,13 @@ export class Engine {
     // name tags & bubbles on top of the lighting
     ctx.setTransform(S, 0, 0, S, -left * S, -top * S);
     for (const e of ents) e.tag();
+    // "👥 3" over buildings with people inside
+    for (const b of buildings) {
+      const n = this.occupancy(b.id);
+      if (!n) continue;
+      const f = doorFront(b);
+      if (vis(f.x * TILE, f.y * TILE)) this.badge(f.x + 0.85, f.y - 1.3, `👥 ${n}`);
+    }
 
     // rain (screen space)
     if (this.drops.length) {
@@ -1017,6 +1538,116 @@ export class Engine {
     }
   }
 
+  private badge(x: number, y: number, text: string) {
+    const ctx = this.ctx;
+    ctx.font = `700 8px ${FONT}`;
+    ctx.textAlign = 'center';
+    const w = ctx.measureText(text).width + 10;
+    ctx.fillStyle = 'rgba(25,169,116,0.95)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.roundRect(x * TILE - w / 2, y * TILE - 8, w, 13, 6.5);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(text, x * TILE, y * TILE + 1.8);
+  }
+
+  /** Inside a building: the room, its furniture, and everyone in it. */
+  private renderRoom(sc: Scene) {
+    const ctx = this.ctx;
+    const r = sc.r;
+    const S = this.dpr * this.zoom;
+    const left = this.cam.x - this.vw / 2 / this.zoom;
+    const top = this.cam.y - this.vh / 2 / this.zoom;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#15171d';
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.setTransform(S, 0, 0, S, -left * S, -top * S);
+    if (sc.canvas) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(sc.canvas, 0, 0, r.w * TILE, r.h * TILE);
+    }
+    // a glimpse of the street through the door
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.fillRect(r.exit * TILE, r.h * TILE, TILE, 0.6 * TILE);
+    // tap ripple
+    if (this.tap && this.t - this.tap.t < 0.6) {
+      const k = (this.t - this.tap.t) / 0.6;
+      ctx.strokeStyle = `rgba(255,255,255,${1 - k})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(this.tap.x * TILE, this.tap.y * TILE, 6 + k * 10, 3 + k * 5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // where you'd stand to use something
+    if (this.nearUse) {
+      const [ux, uy] = this.nearUse.at;
+      ctx.fillStyle = `rgba(255,230,90,${0.28 + Math.sin(this.t * 5) * 0.1})`;
+      ctx.beginPath();
+      ctx.ellipse(ux * TILE, uy * TILE, 14, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    type Ent = { y: number; draw: () => void; tag?: () => void };
+    const ents: Ent[] = [];
+    const SEAT = ['chair', 'stool', 'bench', 'armchair', 'sofa'];
+    for (const f of r.furn) {
+      if (f.k === 'rug' || WALL_MOUNTED.includes(f.k)) continue;
+      ents.push({ y: SEAT.includes(f.k) ? f.y + 0.5 : f.y + f.h - 0.05, draw: () => drawFurn(ctx, f, this.t) });
+    }
+    const person = (x: number, y: number, a: import('./types').Avatar, facing: Facing, moving: boolean, t: number, tag: () => void, phone = false) =>
+      ents.push({
+        y,
+        draw: () => {
+          ctx.save();
+          ctx.translate(x * TILE, y * TILE);
+          drawAvatar(ctx, a, { facing, moving, t, phone });
+          ctx.restore();
+        },
+        tag,
+      });
+    for (const st of sc.staff) person(st.x, st.y, st.avatar, st.facing, false, this.t, () => this.nameTag(st.x, st.y, st.name, 'npc', st.bubble, st.role));
+    for (const b of this.bots) if (b.inside === r.id) person(b.x, b.y, b.avatar, b.facing, b.moving, this.t + b.speed * 3, () => this.nameTag(b.x, b.y, b.name, 'npc', b.bubble), !b.moving && b.phone);
+    for (const rm of this.remotes.values()) if (rm.p.room === r.id) person(rm.rx, rm.ry, rm.p.avatar, rm.p.facing, rm.p.moving, this.t, () => this.nameTag(rm.rx, rm.ry, rm.p.name, 'player', rm.bubble));
+    const p = this.player;
+    person(p.x, p.y, this.save.avatar, p.facing, p.moving, this.t, () => this.nameTag(p.x, p.y, this.save.name, 'me', this.bubble));
+    ents.sort((a, b) => a.y - b.y);
+    for (const e of ents) e.draw();
+    // a little warmth (or chill) to the light
+    if (r.mood) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = r.mood === 'warm' ? 'rgba(255,170,70,0.07)' : r.mood === 'cool' ? 'rgba(120,170,255,0.05)' : 'rgba(255,255,255,0.03)';
+      ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      ctx.setTransform(S, 0, 0, S, -left * S, -top * S);
+    }
+    // markers over things you can use
+    ctx.font = `11px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const u of r.uses) {
+      const f = r.furn.find((x) => x.use === u.id);
+      const mx = f ? (f.x + f.w / 2) * TILE : u.at[0] * TILE;
+      const tall = f && ['shelf', 'fridge', 'books', 'ticketmachine', 'quizmachine', 'washer', 'dryer', 'door', 'escalator', 'kitchen', 'shower', 'weights', 'fire', 'tv', 'treadmill', 'barberchair'].includes(f.k);
+      const my = (f ? f.y * TILE - (tall ? 56 : 26) : (u.at[1] - 1.6) * TILE) + Math.sin(this.t * 2.4 + mx) * 2;
+      const near = this.nearUse === u;
+      ctx.globalAlpha = near ? 1 : 0.82;
+      ctx.fillStyle = near ? '#ffd23f' : 'rgba(255,255,255,0.92)';
+      ctx.beginPath();
+      ctx.roundRect(mx - 9, my - 9, 18, 18, 6);
+      ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.fillText(u.emoji, mx, my + 1);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textBaseline = 'alphabetic';
+    for (const e of ents) e.tag?.();
+    // the way out
+    ctx.font = `700 7px ${FONT}`;
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText('▼ EXIT', (r.exit + 0.5) * TILE, (r.h + 0.35) * TILE);
+  }
+
   private spotMarker(sp: Building, near: boolean) {
     const ctx = this.ctx;
     const x = sp.x * TILE;
@@ -1045,13 +1676,13 @@ export class Engine {
     ctx.textBaseline = 'alphabetic';
   }
 
-  private nameTag(x: number, y: number, name: string, kind: 'me' | 'npc' | 'player', bubble?: { text: string; until: number } | null) {
+  private nameTag(x: number, y: number, name: string, kind: 'me' | 'npc' | 'player', bubble?: { text: string; until: number } | null, role?: string) {
     const ctx = this.ctx;
     const px = x * TILE;
     const py = y * TILE - 50;
     ctx.font = `600 8.5px ${FONT}`;
     ctx.textAlign = 'center';
-    const label = kind === 'npc' ? `${name} · NPC` : name;
+    const label = kind === 'npc' ? `${name} · ${role ? (role.length <= 14 ? role : 'staff') : 'NPC'}` : name;
     const w = ctx.measureText(label).width + 10;
     ctx.fillStyle = kind === 'me' ? 'rgba(255,210,63,0.95)' : kind === 'npc' ? 'rgba(30,30,40,0.55)' : 'rgba(255,255,255,0.95)';
     ctx.beginPath();

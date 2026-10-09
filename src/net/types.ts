@@ -13,13 +13,29 @@ export interface PlayerState {
   facing: Facing;
   moving: boolean;
   bike?: boolean;
+  /** building id when inside one (x/y are then room coordinates) */
+  room?: string;
+  /** 0-100, shown on your profile card */
+  mood?: number;
+  /** short status line (job etc.), shown on your profile card */
+  status?: string;
 }
+
+/** Things you can do to another player. Canned only: no free text crosses the wire here. */
+export const WIRE_ACTS = ['wave', 'compliment', 'drink', 'follow', 'invite', 'accept', 'decline', 'nod'] as const;
+export type WireAct = (typeof WIRE_ACTS)[number];
 
 /** Everything social that crosses the wire: Natter posts/replies/likes and private messages. */
 export type SocialWire =
   | { t: 'post'; id: string; from: string; name: string; text: string; ts: number; replyTo?: string; avatar?: Avatar }
   | { t: 'like'; id: string; from: string; post: string }
-  | { t: 'dm'; id: string; from: string; name: string; to: string; text: string; ts: number };
+  | { t: 'dm'; id: string; from: string; name: string; to: string; text: string; ts: number }
+  /** a tap-to-interact action aimed at one player (to = their network id) */
+  | { t: 'act'; id: string; from: string; name: string; to: string; kind: WireAct; n?: number; place?: string }
+  /** room chat: a short line said out loud inside a building, to whoever's in there */
+  | { t: 'say'; id: string; from: string; name: string; room: string; text: string; ts: number };
+
+export const MAX_SAY = 100;
 
 export type NetMode = 'online' | 'local' | 'offline';
 
@@ -59,6 +75,9 @@ export function sanitizePlayer(raw: unknown): PlayerState | null {
     facing: FACINGS.includes(p.facing as Facing) ? (p.facing as Facing) : 'down',
     moving: !!p.moving,
     bike: !!p.bike,
+    room: okId(p.room, 24) ? p.room : undefined,
+    mood: Number.isFinite(Number(p.mood)) && p.mood != null ? Math.max(0, Math.min(100, Math.round(Number(p.mood)))) : undefined,
+    status: typeof p.status === 'string' ? cleanMessage(p.status, 40) || undefined : undefined,
   };
 }
 
@@ -78,6 +97,17 @@ export function sanitizeSocial(raw: unknown): SocialWire | null {
     const text = cleanMessage(String(m.text ?? ''), MAX_DM);
     if (!text) return null;
     return { t: 'dm', id: m.id, from: m.from, name: cleanName(String(m.name ?? '')), to: m.to, text, ts };
+  }
+  if (m.t === 'act') {
+    if (!okId(m.to) || !WIRE_ACTS.includes(m.kind as WireAct)) return null;
+    const n = Number(m.n);
+    return { t: 'act', id: m.id, from: m.from, name: cleanName(String(m.name ?? '')), to: m.to, kind: m.kind as WireAct, n: Number.isInteger(n) && n >= 0 && n < 20 ? n : undefined, place: okId(m.place, 24) ? m.place : undefined };
+  }
+  if (m.t === 'say') {
+    if (!okId(m.room, 24)) return null;
+    const text = cleanMessage(String(m.text ?? ''), MAX_SAY);
+    if (!text) return null;
+    return { t: 'say', id: m.id, from: m.from, name: cleanName(String(m.name ?? '')), room: m.room, text, ts };
   }
   return null;
 }

@@ -1,12 +1,35 @@
-import { H, W, isSolid } from './world';
+import { H, W, isSolid as worldSolid } from './world';
 import { tileCost, type CostMode } from './traffic';
+
+/** Any walkable tile grid: the street (default) or a building interior. */
+export interface Grid {
+  w: number;
+  h: number;
+  solid: (x: number, y: number) => boolean;
+}
+export const STREET: Grid = { w: W, h: H, solid: worldSolid };
+// the grid the current search runs on (searches are synchronous, so a module variable is safe)
+let G: Grid = STREET;
+const isSolid = (x: number, y: number) => G.solid(x, y);
 
 /**
  * Weighted A* over the tile grid (8-way, no corner cutting). Returns waypoints in tile units, smoothed.
  * `mode` picks the cost map: NPCs ('ped') hate stepping into traffic lanes except at crossings;
  * the player ('player') mildly prefers pavements; 'plain' is distance only.
  */
-export function findPath(sx: number, sy: number, tx: number, ty: number, mode: CostMode = 'plain'): { x: number; y: number }[] | null {
+export function findPath(sx: number, sy: number, tx: number, ty: number, mode: CostMode = 'plain', grid: Grid = STREET): { x: number; y: number }[] | null {
+  const prev = G;
+  G = grid;
+  try {
+    return search(sx, sy, tx, ty, grid === STREET ? mode : 'plain');
+  } finally {
+    G = prev;
+  }
+}
+
+function search(sx: number, sy: number, tx: number, ty: number, mode: CostMode): { x: number; y: number }[] | null {
+  const W = G.w;
+  const H = G.h;
   const start = { x: Math.floor(sx), y: Math.floor(sy) };
   let goal = { x: Math.floor(tx), y: Math.floor(ty) };
   if (isSolid(goal.x, goal.y)) {
@@ -76,7 +99,16 @@ function nearestOpen(x: number, y: number) {
 }
 
 /** Can a body of radius r walk straight from a to b? */
-export function lineClear(ax: number, ay: number, bx: number, by: number, r = 0.3) {
+export function lineClear(ax: number, ay: number, bx: number, by: number, r = 0.3, grid?: Grid) {
+  if (grid && grid !== G) {
+    const prev = G;
+    G = grid;
+    try {
+      return lineClear(ax, ay, bx, by, r);
+    } finally {
+      G = prev;
+    }
+  }
   const d = Math.hypot(bx - ax, by - ay);
   const steps = Math.ceil(d / 0.2);
   for (let i = 0; i <= steps; i++) {
@@ -97,7 +129,7 @@ function lineCheap(ax: number, ay: number, bx: number, by: number, mode: CostMod
     const t = steps ? i / steps : 0;
     const x = Math.floor(ax + (bx - ax) * t);
     const y = Math.floor(ay + (by - ay) * t);
-    if (tileCost(mode, x, y) > 1.5 && !onPath.has(y * W + x)) return false;
+    if (tileCost(mode, x, y) > 1.5 && !onPath.has(y * G.w + x)) return false;
   }
   return true;
 }
